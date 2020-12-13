@@ -180,6 +180,7 @@ class DiabetesTrial:
         
         if apply_dropout:
             self._apply_dropout()        
+        
         self._compute_actions(policy)            
         self._apply_state_transition()
         
@@ -200,10 +201,10 @@ def get_burned_in_states(n, mu_burn, t_burn=50):
     return initial_states
 
 if __name__ == "__main__":
-    t_max = 24   
-    n = 100
+    t_max = 7  
+    n = 3
     mu = lambda x: np.full_like(x,fill_value=0.3)
     
     trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n, mu))
     for t in range(t_max):
-        trial.step_forward_in_time(mu, apply_dropout=False)
+        trial.step_forward_in_time(mu, apply_dropout=True)
