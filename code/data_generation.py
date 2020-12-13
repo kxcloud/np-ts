@@ -3,11 +3,12 @@ from scipy.special import expit
 
 np.set_printoptions(precision=3)
 
-# State values at time t describe the period time (t-1,t]
+# Feature values at time t describe the period time (t-1,t]
 feature_names = [
     "stress",
     "fatigue",
     "unhealthy_ind",
+    "unhealthy_ind-1",
     "calories",
     "calories-1",
     "calories-2",
@@ -39,7 +40,7 @@ stress_std = 3
 stress_min, stress_max = (0, 15)
 
 class DiabetesTrial:
-    def __init__(self, n, t_total):
+    def __init__(self, n, t_total, initial_states=None):
         self.n = n
         self.t_total = t_total
         self.S = np.full((n, t_total+1, p), np.nan) # States (patient features)
@@ -47,11 +48,18 @@ class DiabetesTrial:
         self.T_dis = np.full(n, np.inf) # Per-patient disengagement times
         self.R = np.full((n, t_total), np.nan) # Observed utilities
         
-        self.S[:,0,:] = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
+        if initial_states is None:
+            initial_states = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
+        self.S[:,0,:] = initial_states
         
         # These attributes store values that change w.r.t. the current time.
         self.t = 0
         self.engaged_inds = np.full(n, True)
+    
+    def __repr__(self):
+        return "DiabetesTrial(n={}, t_total={}, num_engaged={}, t={})".format(
+            self.n, self.t_total, np.sum(self.engaged_inds), self.t
+        )
     
     def get_S(self, feature_name):
         """ 
@@ -101,9 +109,9 @@ class DiabetesTrial:
             0.1*stress_mean + 0.9*self.get_S("stress") 
             - 2 * message_ind * (1-prev_fatigue)
             + np.random.normal(0, stress_std, size=n_engaged)
-        ).clip(stress_min, stress_max)
+        ).clip(stress_min, stress_max).round(0)
           
-        fatigue = (0.95*prev_fatigue**2 + 0.4*message_ind).clip(0,1)
+        fatigue = (0.95*prev_fatigue**2 + 0.4*message_ind).clip(0,1).round(2)
         
         exercise = (
             (np.random.binomial(1, 0.2, size=n_engaged) 
@@ -112,11 +120,11 @@ class DiabetesTrial:
              * np.random.normal(31, 5, size=n_engaged)).clip(min=0)
         )
         
-        expit_stress = expit(self.get_S("stress") - 7)
+        expit_stress = expit( (self.get_S("stress") - 7)/4 )
                 
         eat_ind = np.random.binomial(1, 0.1 + 0.3*expit_stress, size=n_engaged)
         unhealthy_snack_ind = (
-            eat_ind * np.random.binomial(1, 0.5*expit_stress, size=n_engaged)
+            eat_ind * np.random.binomial(1, expit_stress, size=n_engaged)
         )
         
         calories = (
@@ -138,6 +146,7 @@ class DiabetesTrial:
         self.set_S("stress", stress)
         self.set_S("fatigue", fatigue)
         self.set_S("unhealthy_ind", unhealthy_snack_ind)
+        self.set_S("unhealthy_ind-1", self.get_S("unhealthy_ind"))
         self.set_S("calories", calories)
         self.set_S("calories-1", self.get_S("calories"))
         self.set_S("calories-2", self.get_S("calories-1"))
@@ -150,9 +159,9 @@ class DiabetesTrial:
     def _compute_rewards(self):
         pass
         
-    def step_forward_in_time(self, policy, apply_dropout=True):
+    def step_forward_in_time(self, policy, apply_dropout):
         if self.t >= self.t_total:
-            raise RuntimeError(f"The trial is over; t_prev={self.t_prev}.")
+            raise RuntimeError(f"The trial is over; t={self.t}.")
         
         if apply_dropout:
             self._apply_dropout()    
@@ -161,7 +170,18 @@ class DiabetesTrial:
         self._apply_state_transition()
         self._compute_rewards()
         self.t += 1
-                
-trial = DiabetesTrial(n=4, t_total=5)
-for i in range(trial.t_total):
-    trial.step_forward_in_time(lambda x: np.full_like(x,fill_value=0.3))
+
+def get_burned_in_states(n, t_burn, mu_burn):
+    trial_burn = DiabetesTrial(n=n, t_total=t_burn)
+    for t in range(t_burn):
+        trial_burn.step_forward_in_time(mu_burn, apply_dropout=False)
+    initial_states = trial_burn.S[:,-1,:]
+    return initial_states
+    
+t_max = 24   
+n = 100
+mu = lambda x: np.full_like(x,fill_value=0.3)
+
+trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n, 50, mu))
+for t in range(t_max):
+    trial.step_forward_in_time(mu, apply_dropout=False)
