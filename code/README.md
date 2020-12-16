@@ -1,5 +1,5 @@
 # NP-TS project code
-Code for application of the Neyman-Pearson Thompson Sampling algorithm to simulated data. Overviews existing scripts are given below.
+Code for application of the Neyman-Pearson Thompson Sampling algorithm to simulated data. Overviews of existing scripts are given below.
 
 ### data_generation.py
 Defines the `DiabetesTrial` class, a stateful object which holds fixed-size Numpy arrays of states, actions, rewards, and disengagement times representing multiple instances of a Markov Decision Process (MDP). Key methods for a `trial` include
