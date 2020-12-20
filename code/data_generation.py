@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from scipy.special import expit
 
 np.set_printoptions(precision=3)
@@ -20,7 +21,13 @@ feature_names = [
 ]
 s_idx = { feature_name : j for j, feature_name in enumerate(feature_names)}
 a_idx = {"insulin" : 0, "message" : 1}
-p = len(feature_names)
+
+action_space = [
+    np.array([0,0]),
+    np.array([1,0]),
+    np.array([0,1]),
+    np.array([1,1])
+]
 
 gluc_mean = 100
 gluc_std = 5.5
@@ -39,11 +46,25 @@ stress_mean = 4.5
 stress_std = 2
 stress_min, stress_max = (0, 15)
 
+def random_choice_vec(a, p):
+    num_patients = p.shape[0]
+    action_shape = a[0].shape
+        
+    rand_per_item = np.random.uniform(size=(num_patients,1))
+    action_index = (np.cumsum(p, axis=1) < rand_per_item).argmin(axis=1)
+    
+    #TODO: vectorize this.
+    action_array = np.zeros((num_patients, *action_shape), dtype=int)
+    for i, act_idx in enumerate(action_index):
+        action_array[i,:] = a[act_idx]
+    return action_array
+    
 class DiabetesTrial:
     def __init__(self, n, t_total, initial_states=None, compute_rewards=True):
         self.n = n
+        self.p = len(feature_names)
         self.t_total = t_total
-        self.S = np.full((n, t_total+1, p), np.nan) # States (patient features)
+        self.S = np.full((n, t_total+1, self.p), np.nan) # States (patient features)
         self.A = np.full((n, t_total, 2), np.nan) # Actions (insulin x messaging)
         self.T_dis = np.full(n, np.inf) # Per-patient disengagement times
         
@@ -101,9 +122,14 @@ class DiabetesTrial:
         just_disengaged = self.engaged_inds < engaged_inds_before
         self.T_dis[just_disengaged] = self.t
     
-    def _compute_actions(self, policy):
-        s_prev = self.S[self.engaged_inds, self.t, :]
-        actions = np.random.binomial(1, policy(s_prev))
+    def _compute_actions(self, policy=None):
+        if policy is None:
+            num_remaining = np.sum(self.engaged_inds)
+            actions = np.random.binomial(1, p=0.3, size=(num_remaining, 2))
+        else:
+            s_prev = self.S[self.engaged_inds, self.t, :]
+            action_probs = policy.act(s_prev)
+            actions = random_choice_vec(action_space, action_probs)
         self.set_A("insulin", actions[:, a_idx["insulin"]])
         self.set_A("message", actions[:, a_idx["message"]])
     
@@ -191,9 +217,13 @@ class DiabetesTrial:
     def get_returns(self):
         """ Return per-patient total rewards. """
         return np.nansum(self.R, axis=1)
-        
-
-def get_burned_in_states(n, mu_burn, t_burn=50):
+    
+    def get_patient_table(self, i):
+        """ Return observations for patient i as a DataFrame. """
+        last_time = int(min(self.t_total, self.T_dis[i]))
+        return pd.DataFrame(self.S[i,:last_time,:], columns = feature_names)
+    
+def get_burned_in_states(n, mu_burn=None, t_burn=50):
     trial_burn = DiabetesTrial(n=n, t_total=t_burn, compute_rewards=False)
     for t in range(t_burn):
         trial_burn.step_forward_in_time(mu_burn, apply_dropout=False)
@@ -205,6 +235,4 @@ if __name__ == "__main__":
     n = 3
     mu = lambda x: np.full_like(x,fill_value=0.3)
     
-    trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n, mu))
-    for t in range(t_max):
-        trial.step_forward_in_time(mu, apply_dropout=True)
+    trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n))

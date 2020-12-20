@@ -23,7 +23,7 @@ def plot_feature_dist(feature, trial):
 
 t_max = 48  
 n = 100
-mu = lambda x: np.full_like(x,fill_value=0.3)
+mu = None
 
 trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n, mu))
 for t in range(t_max):
