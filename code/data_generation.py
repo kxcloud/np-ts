@@ -218,10 +218,13 @@ class DiabetesTrial:
         """ Return per-patient total rewards. """
         return np.nansum(self.R, axis=1)
     
+    def num_timesteps(self, i):
+        """ Return the number of timesteps for patient i. """
+        return int(min(self.t+1, self.T_dis[i]))
+    
     def get_patient_table(self, i):
         """ Return observations for patient i as a DataFrame. """
-        last_time = int(min(self.t_total, self.T_dis[i]))
-        return pd.DataFrame(self.S[i,:last_time,:], columns = feature_names)
+        return pd.DataFrame(self.S[i,:self.num_timesteps(i)], columns = feature_names)
     
 def get_burned_in_states(n, mu_burn=None, t_burn=50):
     trial_burn = DiabetesTrial(n=n, t_total=t_burn, compute_rewards=False)
@@ -233,6 +236,8 @@ def get_burned_in_states(n, mu_burn=None, t_burn=50):
 if __name__ == "__main__":
     t_max = 7  
     n = 3
-    mu = lambda x: np.full_like(x,fill_value=0.3)
+    mu = None
     
     trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n))
+    for t in range(t_max):
+        trial.step_forward_in_time(mu, apply_dropout=True)
