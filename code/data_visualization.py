@@ -3,10 +3,13 @@ import matplotlib.pyplot as plt
 
 import data_generation as dg
 
-def plot_feature_over_time(feature, trial, num_to_plot=10):
+def plot_feature_over_time(feature, trial, num_to_plot=10, hlines=[]):
     feature_over_time = trial.S[range(num_to_plot),:,dg.s_idx[feature]]
     fig, ax = plt.subplots()
+    for value in hlines:
+        ax.axhline(y=value, ls="--", lw=1, color="gray")
     ax.plot(feature_over_time.T)
+
     ax.set_title(f"Patient {feature} over time")
     ax.set_xlabel("time")
     ax.set_ylabel(feature)
@@ -36,7 +39,7 @@ plt.show()
 
 plot_feature_over_time("stress", trial)
 plot_feature_over_time("fatigue", trial)
-plot_feature_over_time("glucose", trial)
+plot_feature_over_time("glucose", trial, hlines=[80, 120])
 plot_feature_over_time("insulin-1", trial)
 
 plot_feature_dist("exercise", trial)
