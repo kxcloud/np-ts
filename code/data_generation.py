@@ -22,6 +22,7 @@ feature_names = [
 s_idx = { feature_name : j for j, feature_name in enumerate(feature_names)}
 a_idx = {"insulin" : 0, "message" : 1}
 
+# Define what action indexes refer to.
 action_space = [
     np.array([0,0]),
     np.array([1,0]),
@@ -46,20 +47,18 @@ stress_mean = 4.5
 stress_std = 2
 stress_min, stress_max = (0, 15)
 
-def random_choice_vec(a, p):
+def random_choice_idx(p):
+    """ 
+    Basically np.random.choice with different probabilities per item.
+    """
     num_patients = p.shape[0]
-    action_shape = a[0].shape
-        
     rand_per_item = np.random.uniform(size=(num_patients,1))
     action_index = (np.cumsum(p, axis=1) < rand_per_item).argmin(axis=1)
     
-    #TODO: vectorize this.
-    action_array = np.zeros((num_patients, *action_shape), dtype=int)
-    prob_array = np.zeros((num_patients, 1), dtype=float)
-    for i, act_idx in enumerate(action_index):
-        action_array[i,:] = a[act_idx]
-        prob_array[i] = p[i, act_idx]
-    return action_array
+    action_prob = np.zeros(num_patients)
+    for i in range(num_patients):
+        action_prob[i] = p[i, action_index[i]]
+    return action_index, action_prob
     
 class DiabetesTrial:
     def __init__(self, n, t_total, initial_states=None, compute_extras=True):
@@ -67,9 +66,9 @@ class DiabetesTrial:
         self.p = len(feature_names)
         self.t_total = t_total
         self.S = np.full((n, t_total + 1, self.p), np.nan) # States (patient features)
-        self.A = np.full((n, t_total, 2), np.nan) # Actions (insulin x messaging)
+        self.A = np.full((n, t_total), np.nan) # Action index
         self.T_dis = np.full(n, np.inf) # Per-patient disengagement times
-        
+                
         # Save compute during burn-in by skipping calculation of utility.
         if compute_extras:
             self.R = np.full((n, t_total), np.nan) # Observed utilities
@@ -91,13 +90,19 @@ class DiabetesTrial:
             self.n, self.t_total, np.sum(self.engaged_inds), self.t
         )
     
+    def check_time(self, t):
+        if t is None:
+            t = self.t
+        elif t < 0:
+            print(f"Warning: time index {t} is negative.")
+        return t
+            
     def get_S(self, feature_name, t=None):
         """ 
         Convenience function for getting the value of engaged patient features
         at the CURRENT time step.
         """
-        if t is None:
-            t = self.t
+        t = self.check_time(t)
         return self.S[self.engaged_inds, t, s_idx[feature_name]]
         
     def set_S(self, feature_name, feature_value):
@@ -107,13 +112,42 @@ class DiabetesTrial:
         """
         self.S[self.engaged_inds, self.t+1, s_idx[feature_name]] = feature_value
     
-    def get_A(self, action_name, t=None):
-        if t is None:
-            t = self.t
-        return self.A[self.engaged_inds, t, a_idx[action_name]]
+    def get_A(self, t=None):
+        t = self.check_time(t)
+        return self.A[self.engaged_inds, t]
+    
+    def get_A_indicators(self, t=None):
+        """ 
+        Return array of action indicators, where the (i,j)-entry is the 
+        indicator that patient i received treatment type j at time t.
+        """
+        t = self.check_time(t)
+        A = self.get_A(t)
+        num_remaining = np.sum(self.engaged_inds)
+        num_action_types = len(action_space[0])
+        A_indicators = np.zeros((num_remaining, num_action_types), dtype=int)
+        for i, action_idx in enumerate(A):
+            A_indicators[i,:] = action_space[int(action_idx)]
+        return A_indicators
+    
+    def set_A(self, action_index):
+        self.A[self.engaged_inds, self.t] = action_index
+    
+    def _compute_actions(self, policy=None):
+        if policy is None:
+            num_remaining = np.sum(self.engaged_inds)
+            n_actions = len(action_space)
+            all_action_probs = np.ones((num_remaining, n_actions)) / n_actions
+        else:
+            s_prev = self.S[self.engaged_inds, self.t, :]
+            all_action_probs = policy.act(s_prev)
         
-    def set_A(self, action_name, action_value):
-        self.A[self.engaged_inds, self.t, a_idx[action_name]] = action_value
+        action, action_prob = random_choice_idx(all_action_probs)
+            
+        if self.A_prob is not None:
+            self.A_prob[self.engaged_inds, self.t] = action_prob
+            
+        self.set_A(action)
     
     def _apply_dropout(self):
         dropout_probs = 0.2*expit(self.get_S("stress")-8) + 0.8 * 0.02
@@ -126,27 +160,14 @@ class DiabetesTrial:
         just_disengaged = self.engaged_inds < engaged_inds_before
         self.T_dis[just_disengaged] = self.t
     
-    def _compute_actions(self, policy=None):
-        if policy is None:
-            num_remaining = np.sum(self.engaged_inds)
-            probs = 0.3
-            actions = np.random.binomial(1, p=probs, size=(num_remaining, 2))
-        else:
-            s_prev = self.S[self.engaged_inds, self.t, :]
-            all_action_probs = policy.act(s_prev)
-            actions, probs = random_choice_vec(action_space, all_action_probs)
-            
-        if self.A_prob is not None:
-            self.A_prob[self.engaged_inds, self.t] = probs
-            
-        self.set_A("insulin", actions[:, a_idx["insulin"]])
-        self.set_A("message", actions[:, a_idx["message"]])
-    
     def _apply_state_transition(self):
         n_engaged = np.sum(self.engaged_inds)
         
+        action_inds = self.get_A_indicators()
+        message_ind = action_inds[:, a_idx["message"]]
+        insulin_ind = action_inds[:, a_idx["insulin"]]
+           
         prev_fatigue = self.get_S("fatigue")
-        message_ind = self.get_A("message")
         stress = (
             0.1*stress_mean + 0.9*self.get_S("stress") 
             - 2 * message_ind * (1-prev_fatigue)
@@ -178,13 +199,11 @@ class DiabetesTrial:
             + unhealthy_snack_ind * np.random.normal(90, 10, size=n_engaged)
         ).clip(min=0)
         
-        prev_insulin = 0 if self.t == 0 else self.get_A("insulin",t=self.t-1)
-        
         glucose = gluc_mean * (1-gluc_state_effect["glucose"])
         for feature_name, coefficient in gluc_state_effect.items():
             glucose += coefficient * self.get_S(feature_name)
         glucose += (
-            gluc_act_effect * self.get_A("insulin") 
+            gluc_act_effect * insulin_ind 
             + np.random.normal(0, gluc_std, size=n_engaged)
         )
         glucose = glucose.clip(gluc_min, gluc_max)
@@ -200,7 +219,7 @@ class DiabetesTrial:
         self.set_S("exercise", exercise)
         self.set_S("exercise-1", self.get_S("exercise"))
         self.set_S("glucose", glucose)
-        self.set_S("insulin-1", prev_insulin)
+        self.set_S("insulin-1", insulin_ind)
         
     def _compute_rewards(self):
         """ 
@@ -278,7 +297,7 @@ def test_indexing(trial):
             "state array."    
         )
         num_actions_observed = trial.num_treatments_applied(i)
-        assert (~np.isnan(trial.A[i,:,0])).sum() == num_actions_observed, (
+        assert (~np.isnan(trial.A[i,:])).sum() == num_actions_observed, (
             f"Number of treatments applied for patient {i} must match actual "
             "action array."
         )        
