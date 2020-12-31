@@ -73,10 +73,10 @@ class DiabetesTrial:
         # Save compute during burn-in by skipping calculation of utility.
         if compute_extras:
             self.R = np.full((n, t_total), np.nan) # Observed utilities
-            self.A_probs = np.full((n, t_total), np.nan) # Action selection probabilities
+            self.A_prob = np.full((n, t_total), np.nan) # Action selection probabilities
         else: 
             self.R = None
-            self.A_probs = None
+            self.A_prob = None
         
         if initial_states is None:
             initial_states = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
@@ -136,8 +136,8 @@ class DiabetesTrial:
             all_action_probs = policy.act(s_prev)
             actions, probs = random_choice_vec(action_space, all_action_probs)
             
-        if self.A_probs is not None:
-            self.A_probs[self.engaged_inds, self.t] = probs
+        if self.A_prob is not None:
+            self.A_prob[self.engaged_inds, self.t] = probs
             
         self.set_A("insulin", actions[:, a_idx["insulin"]])
         self.set_A("message", actions[:, a_idx["message"]])

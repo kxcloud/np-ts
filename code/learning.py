@@ -65,6 +65,9 @@ def get_value_fn_optimizer(trial, policy, discount=0.99):
         for t in range(last_t):
             phi_s = phi_s_next if t > 0 else policy.state_encoding(trial.S[i,t,:])
             phi_s_next = policy.state_encoding(trial.S[i,t+1,:]) if t < trial.T_dis[i] else 0
+            
+            # imp_weight = policy.act(trial.S[i,t,:])[trial.A[i,t]] / trial.A_probs[i, t]
+            
             all_phi_terms[term_idx, :] = discount * phi_s_next - phi_s    
             all_rewards[term_idx] = trial.R[i,t] 
             term_idx += 1
@@ -72,9 +75,17 @@ def get_value_fn_optimizer(trial, policy, discount=0.99):
     def mean_square_bellman_error(theta):
         return np.sum((all_rewards + all_phi_terms @ theta)**2)/trial.n
     
-    return mean_square_bellman_error
+    return mean_square_bellman_error, all_phi_terms, all_rewards
 
-msbe = get_value_fn_optimizer(trial, policy)
-theta_hat = minimize(msbe, np.zeros(len(dg.feature_names)))
+msbe, all_phi_terms, all_rewards = get_value_fn_optimizer(trial, policy)
+bfgs_obj = minimize(msbe, np.zeros(len(dg.feature_names)))
+theta_hat1 = bfgs_obj.x
 
+from sklearn.linear_model import LinearRegression
+reg = LinearRegression(fit_intercept=False).fit(-all_phi_terms, all_rewards)
 
+theta_hat2 = reg.coef_
+
+print(theta_hat1)
+print(theta_hat2)
+print(f"Abs total diff: {np.abs(theta_hat1-theta_hat2).sum()}")
