@@ -203,11 +203,16 @@ class DiabetesTrial:
         self.set_S("insulin-1", prev_insulin)
         
     def _compute_rewards(self):
-        """ Composite reward for exercise and avoiding unhealthy eating. """
+        """ 
+        Composite reward for exercise and avoiding unhealthy eating. Small
+        penalty for disengaging.
+        """
         self.R[self.engaged_inds, self.t] = (
             self.get_S("exercise", self.t+1) / 800 
             - self.get_S("unhealthy_ind", self.t+1)
         )
+        
+        self.R[self.T_dis == self.t, self.t] = -0.5
         
     def step_forward_in_time(self, policy, apply_dropout):
         if self.t >= self.t_total:

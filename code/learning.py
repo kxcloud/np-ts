@@ -54,39 +54,27 @@ def get_value_fn_optimizer(trial, policy, discount=0.99):
     """
     total_num_actions_taken = 0
     for i in range(trial.n):
-        total_num_actions_taken += trial.num_timesteps(i)
+        total_num_actions_taken += trial.num_treatments_applied(i)
     
-    all_phi_terms = np.zeros((total_num_actions_taken, policy.param_size))
-    all_rewards = np.zeros((total_num_actions_taken))
+    all_phi_terms = np.zeros((total_num_actions_taken, policy.param_size), dtype=np.float64)
+    all_rewards = np.zeros((total_num_actions_taken), dtype=np.float64)
     term_idx = 0
     for i in range(trial.n):
-        T = trial.num_timesteps(i)
+        last_t = trial.num_treatments_applied(i)
         phi_s_next = None
-        for t in range(T-1): # TODO: change to T 
+        for t in range(last_t):
             phi_s = phi_s_next if t > 0 else policy.state_encoding(trial.S[i,t,:])
-            phi_s_next = policy.state_encoding(trial.S[i,t+1,:]) if t < T-1 else 0
+            phi_s_next = policy.state_encoding(trial.S[i,t+1,:]) if t < trial.T_dis[i] else 0
             all_phi_terms[term_idx, :] = discount * phi_s_next - phi_s    
-            all_rewards[term_idx] = trial.R[i,t] if t < trial.t_total else 0
+            all_rewards[term_idx] = trial.R[i,t] 
             term_idx += 1
-            
+
     def mean_square_bellman_error(theta):
         return np.sum((all_rewards + all_phi_terms @ theta)**2)/trial.n
     
     return mean_square_bellman_error
 
-def mean_square_bellman_error(theta, policy=policy, discount=0.99):
-    error = 0
-    for i in range(trial.n):
-        for t in range(trial.num_timesteps(i)-1):
-            s = policy.state_encoding(trial.S[i,t,:])
-            r = trial.R[i,t]
-            s_next = policy.state_encoding(trial.S[i,t+1,:])
-            error += (r + discount * s_next @ theta - s @ theta)**2
-    return error / trial.n
-
 msbe = get_value_fn_optimizer(trial, policy)
-theta_hat2 = minimize(msbe, np.zeros(len(dg.feature_names)))
-
-theta_hat = minimize(mean_square_bellman_error, np.zeros(len(dg.feature_names)))
+theta_hat = minimize(msbe, np.zeros(len(dg.feature_names)))
 
 
