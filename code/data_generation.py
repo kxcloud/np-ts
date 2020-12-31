@@ -55,24 +55,28 @@ def random_choice_vec(a, p):
     
     #TODO: vectorize this.
     action_array = np.zeros((num_patients, *action_shape), dtype=int)
+    prob_array = np.zeros((num_patients, 1), dtype=float)
     for i, act_idx in enumerate(action_index):
         action_array[i,:] = a[act_idx]
+        prob_array[i] = p[i, act_idx]
     return action_array
     
 class DiabetesTrial:
-    def __init__(self, n, t_total, initial_states=None, compute_rewards=True):
+    def __init__(self, n, t_total, initial_states=None, compute_extras=True):
         self.n = n
         self.p = len(feature_names)
         self.t_total = t_total
-        self.S = np.full((n, t_total+1, self.p), np.nan) # States (patient features)
+        self.S = np.full((n, t_total + 1, self.p), np.nan) # States (patient features)
         self.A = np.full((n, t_total, 2), np.nan) # Actions (insulin x messaging)
         self.T_dis = np.full(n, np.inf) # Per-patient disengagement times
         
         # Save compute during burn-in by skipping calculation of utility.
-        if compute_rewards:
+        if compute_extras:
             self.R = np.full((n, t_total), np.nan) # Observed utilities
+            self.A_probs = np.full((n, t_total), np.nan) # Action selection probabilities
         else: 
             self.R = None
+            self.A_probs = None
         
         if initial_states is None:
             initial_states = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
@@ -125,11 +129,16 @@ class DiabetesTrial:
     def _compute_actions(self, policy=None):
         if policy is None:
             num_remaining = np.sum(self.engaged_inds)
-            actions = np.random.binomial(1, p=0.3, size=(num_remaining, 2))
+            probs = 0.3
+            actions = np.random.binomial(1, p=probs, size=(num_remaining, 2))
         else:
             s_prev = self.S[self.engaged_inds, self.t, :]
-            action_probs = policy.act(s_prev)
-            actions = random_choice_vec(action_space, action_probs)
+            all_action_probs = policy.act(s_prev)
+            actions, probs = random_choice_vec(action_space, all_action_probs)
+            
+        if self.A_probs is not None:
+            self.A_probs[self.engaged_inds, self.t] = probs
+            
         self.set_A("insulin", actions[:, a_idx["insulin"]])
         self.set_A("message", actions[:, a_idx["message"]])
     
@@ -227,7 +236,7 @@ class DiabetesTrial:
         return pd.DataFrame(self.S[i,:self.num_timesteps(i)], columns = feature_names)
     
 def get_burned_in_states(n, mu_burn=None, t_burn=50):
-    trial_burn = DiabetesTrial(n=n, t_total=t_burn, compute_rewards=False)
+    trial_burn = DiabetesTrial(n=n, t_total=t_burn, compute_extras=False)
     for t in range(t_burn):
         trial_burn.step_forward_in_time(mu_burn, apply_dropout=False)
     initial_states = trial_burn.S[:,-1,:]
