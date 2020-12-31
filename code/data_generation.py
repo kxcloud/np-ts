@@ -213,10 +213,11 @@ class DiabetesTrial:
         if self.t >= self.t_total:
             raise RuntimeError(f"The trial is over; t={self.t}.")
         
+        self._compute_actions(policy) 
+    
         if apply_dropout:
             self._apply_dropout()        
         
-        self._compute_actions(policy)            
         self._apply_state_transition()
         
         if self.R is not None:
@@ -227,13 +228,31 @@ class DiabetesTrial:
         """ Return per-patient total rewards. """
         return np.nansum(self.R, axis=1)
     
-    def num_timesteps(self, i):
-        """ Return the number of timesteps for patient i. """
-        return int(min(self.t+1, self.T_dis[i]))
+    def last_time_index(self, i):
+        """ 
+        Return the index of the last time point patient i was observed. This 
+        is denoted "T" in the paper. Here, indexing starts at 0 instead of 1,
+        so T=7 implies the patient was observed at 8 time points.
+        """
+        return int(min(self.t, self.T_dis[i]))
     
+    def num_treatments_applied(self, i):
+        """ 
+        Return the number of actions taken / treatments applied to patient i.
+        Disengaged patients had an action applied after their last observed 
+        state, whereas patients observed at the current time have not yet
+        had an action applied.
+        """ 
+        last_time_index = self.last_time_index(i)
+        if last_time_index == self.T_dis[i]:
+            return last_time_index + 1
+        else:
+            return last_time_index
+ 
     def get_patient_table(self, i):
         """ Return observations for patient i as a DataFrame. """
-        return pd.DataFrame(self.S[i,:self.num_timesteps(i)], columns = feature_names)
+        data = self.S[i,:self.last_time_index(i) + 1]
+        return pd.DataFrame(data, columns = feature_names)
     
 def get_burned_in_states(n, mu_burn=None, t_burn=50):
     trial_burn = DiabetesTrial(n=n, t_total=t_burn, compute_extras=False)
@@ -242,11 +261,30 @@ def get_burned_in_states(n, mu_burn=None, t_burn=50):
     initial_states = trial_burn.S[:,-1,:]
     return initial_states
 
+def test_indexing(trial):
+    """ 
+    Run a few tests on active trial to make sure states and actions are 
+    counted correctly. 
+    """
+    for i in range(trial.n):
+        num_states_observed = trial.last_time_index(i) + 1
+        assert (~np.isnan(trial.S[i,:,0])).sum() == num_states_observed, (
+            f"Number of states observed for patient {i} must match actual "
+            "state array."    
+        )
+        num_actions_observed = trial.num_treatments_applied(i)
+        assert (~np.isnan(trial.A[i,:,0])).sum() == num_actions_observed, (
+            f"Number of treatments applied for patient {i} must match actual "
+            "action array."
+        )        
+
 if __name__ == "__main__":
-    t_max = 7  
-    n = 3
+    t_max = 15  
+    n = 20
     mu = None
     
     trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n))
     for t in range(t_max):
         trial.step_forward_in_time(mu, apply_dropout=True)
+        test_indexing(trial)
+        
