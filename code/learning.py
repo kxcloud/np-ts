@@ -15,6 +15,8 @@ class Policy():
             state_encoding = lambda x : x
         self.state_encoding = state_encoding
         
+        self.param_size = len(self.beta)
+        
     def act(self, states):
         action_probs = softmax(self.state_encoding(states) @ self.beta, axis=1)
         return action_probs
@@ -42,16 +44,49 @@ for k in range(0):
 trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n))
 for t in range(t_max):
     trial.step_forward_in_time(policy=None, apply_dropout=True)
-    
 
-def mean_square_bellman_error(theta, discount=0.99):
+policy = Policy(beta_0.copy())    
+
+def get_value_fn_optimizer(trial, policy, discount=0.99):
+    """
+    Precompute terms used for calculating the mean square Bellman Error, then
+    return the objective function.
+    """
+    total_num_actions_taken = 0
+    for i in range(trial.n):
+        total_num_actions_taken += trial.num_timesteps(i)
+    
+    all_phi_terms = np.zeros((total_num_actions_taken, policy.param_size))
+    all_rewards = np.zeros((total_num_actions_taken))
+    term_idx = 0
+    for i in range(trial.n):
+        T = trial.num_timesteps(i)
+        phi_s_next = None
+        for t in range(T-1): # TODO: change to T 
+            phi_s = phi_s_next if t > 0 else policy.state_encoding(trial.S[i,t,:])
+            phi_s_next = policy.state_encoding(trial.S[i,t+1,:]) if t < T-1 else 0
+            all_phi_terms[term_idx, :] = discount * phi_s_next - phi_s    
+            all_rewards[term_idx] = trial.R[i,t] if t < trial.t_total else 0
+            term_idx += 1
+            
+    def mean_square_bellman_error(theta):
+        return np.sum((all_rewards + all_phi_terms @ theta)**2)/trial.n
+    
+    return mean_square_bellman_error
+
+def mean_square_bellman_error(theta, policy=policy, discount=0.99):
     error = 0
     for i in range(trial.n):
         for t in range(trial.num_timesteps(i)-1):
-            s = trial.S[i,t,:]
+            s = policy.state_encoding(trial.S[i,t,:])
             r = trial.R[i,t]
-            s_next = trial.S[i,t+1,:]
-            error += (r + s_next @ theta - s @ theta)**2
+            s_next = policy.state_encoding(trial.S[i,t+1,:])
+            error += (r + discount * s_next @ theta - s @ theta)**2
     return error / trial.n
 
+msbe = get_value_fn_optimizer(trial, policy)
+theta_hat2 = minimize(msbe, np.zeros(len(dg.feature_names)))
+
 theta_hat = minimize(mean_square_bellman_error, np.zeros(len(dg.feature_names)))
+
+
