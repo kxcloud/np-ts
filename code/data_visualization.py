@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import data_generation as dg
 
 def plot_feature_over_time(feature, trial, num_to_plot=10, hlines=[]):
-    feature_over_time = trial.S[range(num_to_plot),:,dg.s_idx[feature]]
+    feature_over_time = trial.S[range(num_to_plot),:,trial.s_idx[feature]]
     fig, ax = plt.subplots()
     for value in hlines:
         ax.axhline(y=value, ls="--", lw=1, color="gray")
@@ -17,7 +17,7 @@ def plot_feature_over_time(feature, trial, num_to_plot=10, hlines=[]):
 
 def plot_feature_dist(feature, trial):
     fig, ax = plt.subplots()
-    all_feature = trial.S[:,:,dg.s_idx[feature]]
+    all_feature = trial.S[:,:,trial.s_idx[feature]]
     flattened = all_feature[~np.isnan(all_feature)].flatten()
     ax.hist(flattened, bins=30, density=True)
     ax.set_xlabel(feature)
