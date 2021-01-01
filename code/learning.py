@@ -1,8 +1,6 @@
 import numpy as np
 from scipy.special import softmax
-from scipy.optimize import minimize 
 from sklearn.linear_model import Ridge
-from sklearn.linear_model import LinearRegression
 
 import data_generation as dg
 
@@ -42,26 +40,6 @@ def policy_eval_oracle(policy, n, t_max, mu_burn=None, discount=0.99):
         trial.step_forward_in_time(policy, apply_dropout=True)
         trial.R[:,t] *= discount**t
     return trial.get_returns().mean()
-
-
-N_ACTIONS = 4
-
-t_max = 48  
-n = 10000
-beta_0 = np.zeros((len(dg.feature_names), N_ACTIONS))
-mu_burn = Policy(beta_0)
-
-for k in range(0):
-    beta_0 = np.random.uniform(size=(len(dg.feature_names), N_ACTIONS))
-    avg_return = policy_eval_oracle(Policy(beta_0), n=1000, t_max=t_max)
-    print(beta_0)
-    print(avg_return)
-    
-trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n))
-for t in range(t_max):
-    trial.step_forward_in_time(policy=None, apply_dropout=True)
-
-policy = Policy(beta_0.copy())    
 
 def get_optimization_terms(trial, state_encoding, discount):
     """ 
@@ -103,7 +81,13 @@ def get_policy_probs(policy, encoded_states, actions):
         selected_action_probs[idx] = all_action_probs[idx,actions[idx]]
     return selected_action_probs
 
-def get_value_estimator(trial, policy, discount=0.99, ridge_penalty=0):
+def get_value_estimator(
+        trial, 
+        policy, 
+        discount=0.99, 
+        ridge_penalty=0,
+        fit_intercept=False
+    ):
     feature_matrix, rewards, encoded_states, actions = get_optimization_terms(
         trial, policy.state_encoding, discount
     ) 
@@ -120,16 +104,37 @@ def get_value_estimator(trial, policy, discount=0.99, ridge_penalty=0):
         wt_feature_matrix = policy_probs[:,None] * feature_matrix
         wt_rewards = policy_probs * rewards
     
-        reg = Ridge(fit_intercept=False, alpha=ridge_penalty)
+        reg = Ridge(fit_intercept=fit_intercept, alpha=ridge_penalty)
         reg.fit(-wt_feature_matrix, wt_rewards)
         return reg
     
     return value_estimator
-    
-value_estimator = get_value_estimator(trial, policy, ridge_penalty=0)
-reg = value_estimator(policy.beta)
-theta_hat = reg.coef_
 
-# Why are these different-- model misspecification?
-value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat)
-mc_value_est = policy_eval_oracle(policy, 1000, t_max=48)
+if __name__ == "__main__":  
+    n_actions = 4
+    t_max = 48  
+    n = 10000
+    beta_0 = np.zeros((12, n_actions))
+    mu_burn = Policy(beta_0)
+    
+    for k in range(0):
+        beta_0 = np.random.uniform(size=(len(dg.feature_names), n_actions))
+        avg_return = policy_eval_oracle(Policy(beta_0), n=1000, t_max=t_max)
+        print(beta_0)
+        print(avg_return)
+        
+    trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n))
+    for t in range(t_max):
+        trial.step_forward_in_time(policy=None, apply_dropout=True)
+    
+    policy = Policy(beta_0.copy())    
+
+    value_estimator = get_value_estimator(trial, policy, ridge_penalty=0, fit_intercept=True)
+    reg = value_estimator(policy.beta)
+    theta_hat = reg.coef_
+    
+    # Why are these different-- model misspecification?
+    value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat)
+    mc_value_est = policy_eval_oracle(policy, 1000, t_max=48)
+    print(f"Avg estimated value across starting states: {value_est_at_t0:0.3f}")
+    print(f"Monte Carlo value estimate:                  {mc_value_est:0.3f}")
