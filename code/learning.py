@@ -32,18 +32,22 @@ class Policy():
         """
         action_probs = self.act(np.expand_dims(state,axis=0))
         return action_probs[0][int(action)]
+    
+    def copy(self):
+        return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
         
-def policy_eval_oracle(policy, n, t_max, mu_burn=None):
+def policy_eval_oracle(policy, n, t_max, mu_burn=None, discount=0.99):
     trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n, mu_burn))
     for t in range(t_max):
         trial.step_forward_in_time(policy, apply_dropout=True)
+        trial.R[:,t] *= discount**t
     return trial.get_returns().mean()
 
 
 N_ACTIONS = 4
 
 t_max = 48  
-n = 100
+n = 10000
 beta_0 = np.zeros((len(dg.feature_names), N_ACTIONS))
 mu_burn = Policy(beta_0)
 
@@ -99,65 +103,33 @@ def get_policy_probs(policy, encoded_states, actions):
         selected_action_probs[idx] = all_action_probs[idx,actions[idx]]
     return selected_action_probs
 
-def fit_value_fn(trial, policy, discount=0.99, ridge_penalty=0):
+def get_value_estimator(trial, policy, discount=0.99, ridge_penalty=0):
     feature_matrix, rewards, encoded_states, actions = get_optimization_terms(
         trial, policy.state_encoding, discount
-    )
+    ) 
+    policy = policy.copy()
     
-    policy_probs = get_policy_probs(policy, encoded_states, actions)
+    def value_estimator(policy_param):
+        """ 
+        Estimate the value for the policy given by policy_param. Returns 
+        fitted scikit-learn regression object.
+        """
+        policy.beta = policy_param
+        policy_probs = get_policy_probs(policy, encoded_states, actions)
     
-    wt_feature_matrix = policy_probs[:,None] * feature_matrix
-    wt_rewards = policy_probs * rewards
+        wt_feature_matrix = policy_probs[:,None] * feature_matrix
+        wt_rewards = policy_probs * rewards
     
-    reg = Ridge(fit_intercept=False, alpha=ridge_penalty).fit(-wt_feature_matrix, wt_rewards)
-    theta_hat2 = reg.coef_
-    return theta_hat2
+        reg = Ridge(fit_intercept=False, alpha=ridge_penalty)
+        reg.fit(-wt_feature_matrix, wt_rewards)
+        return reg
     
-def get_value_fn_optimizer(trial, policy, discount=0.99):
-    """
-    Precompute terms used for calculating the mean square Bellman Error, then
-    return the objective function.
-    """
-    total_num_actions_taken = 0
-    for i in range(trial.n):
-        total_num_actions_taken += trial.num_treatments_applied(i)
+    return value_estimator
     
-    all_phi_terms = np.zeros((total_num_actions_taken, policy.param_size), dtype=np.float64)
-    all_rewards = np.zeros((total_num_actions_taken), dtype=np.float64)
-    term_idx = 0
-    for i in range(trial.n):
-        last_t = trial.num_treatments_applied(i)
-        phi_s_next = None
-        for t in range(last_t):
-            phi_s = phi_s_next if t > 0 else policy.state_encoding(trial.S[i,t,:])
-            phi_s_next = policy.state_encoding(trial.S[i,t+1,:]) if t < trial.T_dis[i] else 0
-            
-            imp_weight = (
-                policy.prob_of(trial.S[i,t,:], trial.A[i,t]) 
-                / trial.A_prob[i, t]
-            )
-            
-            all_phi_terms[term_idx, :] = imp_weight * (
-                discount * phi_s_next - phi_s
-            )
-            all_rewards[term_idx] = imp_weight * trial.R[i,t]
-            term_idx += 1
+value_estimator = get_value_estimator(trial, policy, ridge_penalty=0)
+reg = value_estimator(policy.beta)
+theta_hat = reg.coef_
 
-    def mean_square_bellman_error(theta):
-        return np.sum((all_rewards + all_phi_terms @ theta)**2)/trial.n
-    
-    return mean_square_bellman_error, all_phi_terms, all_rewards
-
-theta_hat3 = fit_value_fn(trial, policy)
-
-msbe, all_phi_terms, all_rewards = get_value_fn_optimizer(trial, policy)
-bfgs_obj = minimize(msbe, np.zeros(len(dg.feature_names)))
-theta_hat1 = bfgs_obj.x
-
-reg = LinearRegression(fit_intercept=False).fit(-all_phi_terms, all_rewards)
-
-theta_hat2 = reg.coef_
-
-print(theta_hat1.round(2))
-print(theta_hat3.round(2))
-print(f"Abs total diff: {np.abs(theta_hat1-theta_hat2).sum()}")
+# Why are these different-- model misspecification?
+value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat)
+mc_value_est = policy_eval_oracle(policy, 1000, t_max=48)
