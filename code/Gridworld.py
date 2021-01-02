@@ -12,7 +12,7 @@ class Gridworld(trial.Trial):
             self, 
             n, 
             t_total, 
-            grid_shape = (10,10),
+            grid_shape = (1,10),
             target_loc = (0,0),
             initial_states=None, 
             compute_extras=True
@@ -25,9 +25,20 @@ class Gridworld(trial.Trial):
     def generate_initial_states(self):
         x_loc = np.random.randint(self.grid_shape[0], size=(self.n,1))
         y_loc = np.random.randint(self.grid_shape[1], size=(self.n,1))
+        # irr = np.random.uniform(size=(self.n, 1))
         return np.hstack([x_loc, y_loc])
+
+    def _apply_dropout(self):
+        dropout_inds = self.get_S("y") == 9
         
-    def _apply_state_transition(self):
+        engaged_inds_before = self.engaged_inds.copy()
+        self.engaged_inds[self.engaged_inds] = np.logical_not(dropout_inds)
+
+        # NOTE: this is slightly inefficient because it compares all patients.
+        just_disengaged = self.engaged_inds < engaged_inds_before
+        self.T_dis[just_disengaged] = self.t
+
+    def _apply_state_transition2(self):
         # NOTE: assumes x, y in first two features are "x" and "y".
         S = self.S[self.engaged_inds,self.t,0:2] 
         A = self.get_A()
@@ -48,15 +59,21 @@ class Gridworld(trial.Trial):
         
         self.set_S("x", S_next[:,0])
         self.set_S("y", S_next[:,1])
+        # self.set_S("irrelevant", np.random.uniform(size=len(S)))
+
+    def _apply_state_transition(self):
+        self.set_S("y", self.get_S("y")+1)
+        self.set_S("x", 0)
 
     def _compute_rewards(self):
         """ Penalty for distance to target point """
-        x_loc, y_loc = self.get_S("x",self.t+1), self.get_S("y",self.t+1)
+        # x_loc, y_loc = self.get_S("x",self.t+1), self.get_S("y",self.t+1)
         
-        euclidean_distance = np.sqrt(
-            (x_loc - self.target_loc[0])**2 + (y_loc - self.target_loc[1])**2
-        )
-        self.R[self.engaged_inds,self.t] = 10-euclidean_distance.round(2)
+        # euclidean_distance = np.sqrt(
+        #     (x_loc - self.target_loc[0])**2 + (y_loc - self.target_loc[1])**2
+        # )
+        self.R[self.engaged_inds,self.t] = 0
+        self.R[self.T_dis == self.t, self.t] = 1
         
 if __name__ == "__main__":
     n = 5
@@ -64,5 +81,7 @@ if __name__ == "__main__":
     mu = None
     trial = Gridworld(n, t_max)
     for t in range(t_max):
-        trial.step_forward_in_time(mu, apply_dropout=False)
+        trial.step_forward_in_time(mu, apply_dropout=True)
+        trial.test_indexing()
+    trial.plot_feature_over_time("y")
         
