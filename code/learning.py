@@ -3,6 +3,7 @@ from scipy.special import softmax
 from sklearn.linear_model import Ridge
 
 import data_generation as dg
+from Gridworld import Gridworld
 
 np.set_printoptions(precision=3)
 
@@ -23,21 +24,13 @@ class Policy():
         else:
             action_probs = softmax(states @ self.beta, axis=1)
         return action_probs
-    
-    def prob_of(self, state, action):
-        """ 
-        Convenience function to get probabilities of state action pairs. 
-        """
-        action_probs = self.act(np.expand_dims(state,axis=0))
-        return action_probs[0][int(action)]
-    
+       
     def copy(self):
         return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
         
-def policy_eval_oracle(policy, n, t_max, mu_burn=None, discount=0.99):
-    trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n, mu_burn))
-    for t in range(t_max):
-        trial.step_forward_in_time(policy, apply_dropout=True)
+def policy_eval_oracle(policy, trial, discount=0.99, dropout=True):
+    for t in range(trial.t_total):
+        trial.step_forward_in_time(policy, apply_dropout=dropout)
         trial.R[:,t] *= discount**t
     return trial.get_returns().mean()
 
@@ -111,21 +104,17 @@ def get_value_estimator(
     return value_estimator
 
 if __name__ == "__main__":  
-    n_actions = 4
-    t_max = 48  
-    n = 10000
-    beta_0 = np.zeros((12, n_actions))
+    t_max = 48 
+    n = 1000
+    dropout = False
+    trial = Gridworld(n, t_max)
+    # trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n))
+    n_actions = len(trial.action_space)
+    beta_0 = np.zeros((trial.S.shape[-1], n_actions))
     mu_burn = Policy(beta_0)
-    
-    for k in range(0):
-        beta_0 = np.random.uniform(size=(len(dg.feature_names), n_actions))
-        avg_return = policy_eval_oracle(Policy(beta_0), n=1000, t_max=t_max)
-        print(beta_0)
-        print(avg_return)
-        
-    trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n))
+            
     for t in range(t_max):
-        trial.step_forward_in_time(policy=None, apply_dropout=True)
+        trial.step_forward_in_time(policy=mu_burn, apply_dropout=dropout)
     
     policy = Policy(beta_0.copy())    
 
@@ -135,6 +124,7 @@ if __name__ == "__main__":
     
     # Why are these different-- model misspecification?
     value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat)
-    mc_value_est = policy_eval_oracle(policy, 1000, t_max=48)
-    print(f"Avg estimated value across starting states: {value_est_at_t0:0.3f}")
-    print(f"Monte Carlo value estimate:                  {mc_value_est:0.3f}")
+    mc_value_est = policy_eval_oracle(policy, Gridworld(n, t_max),dropout=dropout)
+    print(f"Est. value fn param: {theta_hat.round(2)}")
+    print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
+    print(f"Monte Carlo value estimate:                 {mc_value_est:10.3f}")
