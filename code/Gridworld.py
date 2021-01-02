@@ -17,8 +17,8 @@ class Gridworld(trial.Trial):
             initial_states=None, 
             compute_extras=True
         ):
-        self.grid_shape = (10,10)
-        self.target_loc = (5,5)
+        self.grid_shape = grid_shape
+        self.target_loc = target_loc
         super().__init__(n, t_total, initial_states=None, compute_extras=True)
         
     
@@ -39,11 +39,11 @@ class Gridworld(trial.Trial):
             S_next[i,:] = s + direction_dict[direction]
         
         # Stay in bounds.
-        S_next[i,self.s_idx["x"]] = (
-            S_next[i,self.s_idx["x"]].clip(0,self.grid_shape[0])
+        S_next[:,self.s_idx["x"]] = (
+            S_next[:,self.s_idx["x"]].clip(0,self.grid_shape[0]-1)
         )
-        S_next[i,self.s_idx["y"]] = (
-            S_next[i,self.s_idx["y"]].clip(0,self.grid_shape[1])
+        S_next[:,self.s_idx["y"]] = (
+            S_next[:,self.s_idx["y"]].clip(0,self.grid_shape[1]-1)
         )
         
         self.set_S("x", S_next[:,0])
