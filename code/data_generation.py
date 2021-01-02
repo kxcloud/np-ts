@@ -55,6 +55,20 @@ class DiabetesTrial(trial.Trial):
     def generate_initial_states(self):
         return [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
     
+    def get_A_indicators(self, t=None):
+        """ 
+        Return array of action indicators, where the (i,j)-entry is the 
+        indicator that patient i received treatment type j at time t.
+        """
+        t = self.check_time(t)
+        A = self.get_A(t)
+        num_remaining = np.sum(self.engaged_inds)
+        num_action_types = len(self.action_space[0])
+        A_indicators = np.zeros((num_remaining, num_action_types), dtype=int)
+        for i, action_idx in enumerate(A):
+            A_indicators[i,:] = self.action_space[int(action_idx)]
+        return A_indicators
+    
     def _apply_dropout(self):
         dropout_probs = 0.2*expit(self.get_S("stress")-8) + 0.8 * 0.02
         dropout_inds = np.random.binomial(1, dropout_probs)

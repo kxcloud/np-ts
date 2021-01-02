@@ -22,13 +22,7 @@ class Trial:
     feature_names = None 
     action_space = None
 
-    def __init__(
-            self, 
-            n, 
-            t_total,
-            initial_states=None, 
-            compute_extras=True
-        ):
+    def __init__(self, n, t_total, initial_states=None, compute_extras=True):
         self.n = n
         self.p = len(self.feature_names)
         self.t_total = t_total
@@ -92,21 +86,7 @@ class Trial:
     def get_A(self, t=None):
         t = self.check_time(t)
         return self.A[self.engaged_inds, t]
-    
-    def get_A_indicators(self, t=None):
-        """ 
-        Return array of action indicators, where the (i,j)-entry is the 
-        indicator that patient i received treatment type j at time t.
-        """
-        t = self.check_time(t)
-        A = self.get_A(t)
-        num_remaining = np.sum(self.engaged_inds)
-        num_action_types = len(self.action_space[0])
-        A_indicators = np.zeros((num_remaining, num_action_types), dtype=int)
-        for i, action_idx in enumerate(A):
-            A_indicators[i,:] = self.action_space[int(action_idx)]
-        return A_indicators
-    
+        
     def set_A(self, action_index):
         self.A[self.engaged_inds, self.t] = action_index
     
