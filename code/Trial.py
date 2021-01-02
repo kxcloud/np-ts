@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 
 def random_choice_idx(p):
     """ 
@@ -159,3 +161,43 @@ class Trial:
         """ Return observations for patient i as a DataFrame. """
         data = self.S[i,:self.last_time_index(i) + 1]
         return pd.DataFrame(data, columns = self.feature_names)
+    
+    def test_indexing(self):
+        """ 
+        Run a few tests on active trial to make sure states and actions are 
+        counted correctly. 
+        """
+        for i in range(self.n):
+            num_states_observed = self.last_time_index(i) + 1
+            assert (~np.isnan(self.S[i,:,0])).sum() == num_states_observed, (
+                f"Number of states observed for patient {i} must match actual "
+                "state array."    
+            )
+            num_actions_observed = self.num_treatments_applied(i)
+            assert (~np.isnan(self.A[i,:])).sum() == num_actions_observed, (
+                f"Number of treatments applied for patient {i} must match actual "
+                "action array."
+            )    
+            
+    def plot_feature_over_time(self, feature, num_to_plot=None, hlines=[]):
+        num_to_plot = self.n if num_to_plot is None else num_to_plot
+        feature_over_time = self.S[range(num_to_plot),:,self.s_idx[feature]]
+        fig, ax = plt.subplots()
+        for value in hlines:
+            ax.axhline(y=value, ls="--", lw=1, color="gray")
+        ax.plot(feature_over_time.T)
+        ax.set_title(f"Patient {feature} over time")
+        ax.set_xlabel("time")
+        ax.set_ylabel(feature)
+        plt.show()
+        
+    def plot_feature_dist(self, feature):
+        fig, ax = plt.subplots()
+        all_feature = self.S[:,:,self.s_idx[feature]]
+        flattened = all_feature[~np.isnan(all_feature)].flatten()
+        ax.hist(flattened, bins=30, density=True)
+        ax.set_xlabel(feature)
+        ax.set_title(f"Distribution of {feature} across patients, time")
+        plt.show()
+    
+            

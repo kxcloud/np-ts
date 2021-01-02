@@ -2,8 +2,6 @@ import numpy as np
 from scipy.special import expit
 
 import Trial as trial
-
-np.set_printoptions(precision=3)
         
 a_idx = {"insulin" : 0, "message" : 1}
 
@@ -160,23 +158,7 @@ def get_burned_in_states(n, mu_burn=None, t_burn=50):
         trial_burn.step_forward_in_time(mu_burn, apply_dropout=False)
     initial_states = trial_burn.S[:,-1,:]
     return initial_states
-
-def test_indexing(trial):
-    """ 
-    Run a few tests on active trial to make sure states and actions are 
-    counted correctly. 
-    """
-    for i in range(trial.n):
-        num_states_observed = trial.last_time_index(i) + 1
-        assert (~np.isnan(trial.S[i,:,0])).sum() == num_states_observed, (
-            f"Number of states observed for patient {i} must match actual "
-            "state array."    
-        )
-        num_actions_observed = trial.num_treatments_applied(i)
-        assert (~np.isnan(trial.A[i,:])).sum() == num_actions_observed, (
-            f"Number of treatments applied for patient {i} must match actual "
-            "action array."
-        )        
+    
 
 if __name__ == "__main__":
     t_max = 15  
@@ -186,5 +168,4 @@ if __name__ == "__main__":
     trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n))
     for t in range(t_max):
         trial.step_forward_in_time(mu, apply_dropout=True)
-        test_indexing(trial)
-        
+        trial.test_indexing()        

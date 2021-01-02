@@ -2,7 +2,7 @@ import numpy as np
 from scipy.special import softmax
 from sklearn.linear_model import Ridge
 
-import data_generation as dg
+import DiabetesTrial as dt
 from Gridworld import Gridworld
 
 np.set_printoptions(precision=3)
@@ -28,7 +28,7 @@ class Policy():
     def copy(self):
         return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
         
-def policy_eval_oracle(policy, trial, discount=0.99, dropout=True):
+def policy_eval_mc(policy, trial, discount=0.99, dropout=True):
     for t in range(trial.t_total):
         trial.step_forward_in_time(policy, apply_dropout=dropout)
         trial.R[:,t] *= discount**t
@@ -63,7 +63,7 @@ def get_optimization_terms(trial, state_encoding, discount):
             encoded_states[term_idx] = phi_s
             actions[term_idx] = int(trial.A[i,t])
             term_idx += 1
-    
+
     return feature_matrix, rewards, encoded_states, actions
 
 def get_policy_probs(policy, encoded_states, actions):
@@ -83,7 +83,7 @@ def get_value_estimator(
     ):
     feature_matrix, rewards, encoded_states, actions = get_optimization_terms(
         trial, policy.state_encoding, discount
-    ) 
+    )
     policy = policy.copy()
     
     def value_estimator(policy_param):
@@ -104,27 +104,29 @@ def get_value_estimator(
     return value_estimator
 
 if __name__ == "__main__":  
-    t_max = 48 
-    n = 1000
-    dropout = False
+    t_max = 48
+    n = 20
+    dropout = True
     trial = Gridworld(n, t_max)
-    # trial = dg.DiabetesTrial(n, t_max, initial_states=dg.get_burned_in_states(n))
+    # trial = dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n))
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.S.shape[-1], n_actions))
     mu_burn = Policy(beta_0)
-            
+    
+    disc = 1
+        
     for t in range(t_max):
         trial.step_forward_in_time(policy=mu_burn, apply_dropout=dropout)
     
     policy = Policy(beta_0.copy())    
 
-    value_estimator = get_value_estimator(trial, policy, ridge_penalty=0, fit_intercept=True)
+    value_estimator = get_value_estimator(trial, policy, discount=disc, ridge_penalty=0, fit_intercept=False)
     reg = value_estimator(policy.beta)
     theta_hat = reg.coef_
     
     # Why are these different-- model misspecification?
-    value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat)
-    mc_value_est = policy_eval_oracle(policy, Gridworld(n, t_max),dropout=dropout)
-    print(f"Est. value fn param: {theta_hat.round(2)}")
+    value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat + reg.intercept_)
+    mc_value_est = policy_eval_mc(policy, Gridworld(n, t_max), discount=disc, dropout=dropout)
+    print(f"Est. value fn param: {theta_hat.round(3)}, {reg.intercept_:0.3f}")
     print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
     print(f"Monte Carlo value estimate:                 {mc_value_est:10.3f}")
