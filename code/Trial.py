@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
 def random_choice_idx(p):
     """ 
     Basically np.random.choice with different probabilities per item.
@@ -179,6 +178,12 @@ class Trial:
                 "action array."
             )    
             
+    def infer_encoding_size(self, state_encoding):
+        """ Apply state encoding and return the resulting length. """
+        encoding_size = len(state_encoding(self.S[None,0,0,:])[0])
+        print(f"Inferred state encoding size: {encoding_size}.")
+        return encoding_size
+        
     def plot_feature_over_time(self, feature, num_to_plot=None, hlines=[]):
         num_to_plot = self.n if num_to_plot is None else num_to_plot
         feature_over_time = self.S[range(num_to_plot),:,self.s_idx[feature]]
