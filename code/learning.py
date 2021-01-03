@@ -7,14 +7,26 @@ from Gridworld import Gridworld
 
 np.set_printoptions(precision=3)
 
+def intercept_adder(x):
+    n_dims = len(x.shape)
+    if n_dims == 1:
+        return np.array([1,*x])
+    if n_dims == 2:
+        return np.hstack([np.ones((x.shape[0],1)), x])
+    else:
+        raise ValueError(f"Unexpected n_dims: {n_dims}.")
+
 class Policy():
     
-    def __init__(self, beta_0, state_encoding=None):
+    def __init__(self, beta_0, state_encoding=None, add_intercept=True):
         self.beta = beta_0
         
         if state_encoding is None:
             state_encoding = lambda x : x
-        self.state_encoding = state_encoding
+        if add_intercept:
+            self.state_encoding = lambda x: intercept_adder(state_encoding(x))
+        else:
+            self.state_encoding = state_encoding
         
         self.param_size = len(self.beta)
         
@@ -28,7 +40,7 @@ class Policy():
     def copy(self):
         return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
         
-def policy_eval_mc(policy, trial, discount=0.99, dropout=True):
+def policy_eval_mc(policy, trial, discount, dropout=True):
     for t in range(trial.t_total):
         trial.step_forward_in_time(policy, apply_dropout=dropout)
         trial.R[:,t] *= discount**t
@@ -77,9 +89,8 @@ def get_policy_probs(policy, encoded_states, actions):
 def get_value_estimator(
         trial, 
         policy, 
-        discount=0.99, 
-        ridge_penalty=0,
-        fit_intercept=False
+        discount, 
+        ridge_penalty=0
     ):
     feature_matrix, rewards, encoded_states, actions = get_optimization_terms(
         trial, policy.state_encoding, discount
@@ -97,11 +108,11 @@ def get_value_estimator(
         wt_feature_matrix = policy_probs[:,None] * feature_matrix
         wt_rewards = policy_probs * rewards
     
-        reg = Ridge(fit_intercept=fit_intercept, alpha=ridge_penalty)
+        reg = Ridge(alpha=ridge_penalty, fit_intercept=False)
         reg.fit(-wt_feature_matrix, wt_rewards)
         return reg
     
-    return value_estimator
+    return value_estimator, feature_matrix/4, rewards/4
 
 if __name__ == "__main__":  
     t_max = 48
@@ -110,7 +121,7 @@ if __name__ == "__main__":
     trial = Gridworld(n, t_max)
     # trial = dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n))
     n_actions = len(trial.action_space)
-    beta_0 = np.zeros((trial.S.shape[-1], n_actions))
+    beta_0 = np.zeros((trial.S.shape[-1]+1, n_actions))
     mu_burn = Policy(beta_0)
     
     disc = 1
@@ -120,12 +131,12 @@ if __name__ == "__main__":
     
     policy = Policy(beta_0.copy())    
 
-    value_estimator = get_value_estimator(trial, policy, discount=disc, ridge_penalty=0, fit_intercept=False)
+    value_estimator, w, r = get_value_estimator(trial, policy, discount=disc, ridge_penalty=0)
     reg = value_estimator(policy.beta)
     theta_hat = reg.coef_
     
     # Why are these different-- model misspecification?
-    value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat + reg.intercept_)
+    value_est_at_t0 = np.mean(trial.S[:,0,:] @ theta_hat[1:] + theta_hat[0])
     mc_value_est = policy_eval_mc(policy, Gridworld(n, t_max), discount=disc, dropout=dropout)
     print(f"Est. value fn param: {theta_hat.round(3)}, {reg.intercept_:0.3f}")
     print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
