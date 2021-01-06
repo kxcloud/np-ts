@@ -47,12 +47,27 @@ class DiabetesTrial(trial.Trial):
         np.array([1,1])
     ]
     
-    def __init__(self, n, t_total, initial_states=None, compute_extras=True):
+    def __init__(self, n, t_total, initial_states=None, compute_extras=True, 
+            burn_in_policy=None
+        ):
+        self.burn_in_policy = burn_in_policy
         super().__init__(n, t_total, 
             initial_states=initial_states, compute_extras=compute_extras)
     
     def generate_initial_states(self):
-        return [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
+        """ 
+        """
+        burn_in_steps = 50
+        initial_states = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
+        trial_burn = DiabetesTrial(n=self.n, t_total=burn_in_steps, 
+            initial_states=initial_states, compute_extras=False
+        )
+        for t in range(burn_in_steps):
+            trial_burn.step_forward_in_time(
+                self.burn_in_policy, apply_dropout=False
+            )
+        new_initial_states = trial_burn.S[:,-1,:]
+        return new_initial_states
     
     def get_A_indicators(self, t=None):
         """ 
@@ -151,22 +166,14 @@ class DiabetesTrial(trial.Trial):
         )
         
         self.R[self.T_dis == self.t, self.t] = -0.5
-        
-    
-def get_burned_in_states(n, mu_burn=None, t_burn=50):
-    trial_burn = DiabetesTrial(n=n, t_total=t_burn, compute_extras=False)
-    for t in range(t_burn):
-        trial_burn.step_forward_in_time(mu_burn, apply_dropout=False)
-    initial_states = trial_burn.S[:,-1,:]
-    return initial_states
-    
+           
 
 if __name__ == "__main__":
     t_max = 15  
     n = 20
     mu = None
     
-    trial = DiabetesTrial(n, t_max, initial_states=get_burned_in_states(n))
+    trial = DiabetesTrial(n, t_max)
     for t in range(t_max):
         trial.step_forward_in_time(mu, apply_dropout=True)
         trial.test_indexing()        

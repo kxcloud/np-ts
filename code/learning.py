@@ -141,9 +141,10 @@ if __name__ == "__main__":
     n = 2000
     dropout = True
     # trial = Gridworld(n, t_max)
-    trial = dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n))
+    trial = dt.DiabetesTrial(n, t_max)
     feature_scaler = get_feature_scaler(trial)
     encoding = lambda x : add_intercept(feature_scaler(x))
+    # encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     beta_0 = np.random.normal(scale=1, size=beta_0.shape)
@@ -159,7 +160,7 @@ if __name__ == "__main__":
     
     # Why are these different-- model misspecification?
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
-    mc_value_est = policy_eval_mc(policy,dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n)), discount=disc, dropout=dropout)
+    mc_value_est = policy_eval_mc(policy, dt.DiabetesTrial(n, t_max), discount=disc, dropout=dropout)
     print(f"Est. value fn param: {theta_hat.round(3)}")
     print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
     print(f"Monte Carlo value estimate:                 {mc_value_est:10.3f}")
