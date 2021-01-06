@@ -177,6 +177,10 @@ class Trial:
                 f"Number of treatments applied for patient {i} must match actual "
                 "action array."
             )    
+            assert (~np.isnan(self.R[i,:])).sum() == num_actions_observed, (
+                 f"Number of treatments applied for patient {i} must match actual "
+                "reward array."
+            )
             
     def infer_encoding_size(self, state_encoding):
         """ Apply state encoding and return the resulting length. """
