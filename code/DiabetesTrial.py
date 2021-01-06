@@ -48,7 +48,8 @@ class DiabetesTrial(trial.Trial):
     ]
     
     def __init__(self, n, t_total, initial_states=None, compute_extras=True):
-        super().__init__(n, t_total, initial_states=None, compute_extras=True)
+        super().__init__(n, t_total, 
+            initial_states=initial_states, compute_extras=compute_extras)
     
     def generate_initial_states(self):
         return [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
