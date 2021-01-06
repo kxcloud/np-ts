@@ -131,9 +131,16 @@ class Trial:
             self._compute_rewards()
         self.t += 1
     
-    def get_returns(self):
+    def get_returns(self, discount=1, t_0=0):
         """ Return per-patient total rewards. """
-        return np.nansum(self.R, axis=1)
+        if discount == 1:
+            return np.nansum(self.R[:,t_0:], axis=1)
+        else:
+            returns = np.zeros(self.n)
+            for i in range(self.n):
+                for t in range(t_0, self.num_treatments_applied(i)):
+                    returns[i] += self.R[i,t] * discount**(t-t_0)
+            return returns
     
     def last_time_index(self, i):
         """ 

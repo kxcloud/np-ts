@@ -60,11 +60,6 @@ class Policy():
     def copy(self):
         return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
         
-def policy_eval_mc(policy, trial, discount, dropout=True):
-    for t in range(trial.t_total):
-        trial.step_forward_in_time(policy, apply_dropout=dropout)
-        trial.R[:,t] *= discount**t
-    return trial.get_returns().mean()
 
 def get_optimization_terms(trial, state_encoding, discount):
     """ 
@@ -137,7 +132,7 @@ def get_value_estimator(
     return value_estimator, feature_matrix/4, rewards/4
 
 if __name__ == "__main__":  
-    t_max = 48
+    t_max = 200
     n = 2000
     dropout = True
     # trial = Gridworld(n, t_max)
@@ -147,7 +142,7 @@ if __name__ == "__main__":
     # encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
-    beta_0 = np.random.normal(scale=1, size=beta_0.shape)
+    # beta_0 = np.random.normal(scale=1, size=beta_0.shape)
     policy = Policy(beta_0, state_encoding=encoding)    
     disc = 0.99
 
@@ -160,7 +155,7 @@ if __name__ == "__main__":
     
     # Why are these different-- model misspecification?
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
-    mc_value_est = policy_eval_mc(policy, dt.DiabetesTrial(n, t_max), discount=disc, dropout=dropout)
+    mc_value_est = trial.get_returns(discount=disc).mean()
     print(f"Est. value fn param: {theta_hat.round(3)}")
     print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
     print(f"Monte Carlo value estimate:                 {mc_value_est:10.3f}")
