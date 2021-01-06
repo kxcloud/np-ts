@@ -24,8 +24,19 @@ def one_hot_y(x):
         encoded_state[item_idx, int(y)] = 1
     return encoded_state
 
+def get_rbf(function=np.exp, centers=[-1,0,1], scale=1):
+    
+    def rbf(x):
+        num_samples, size = x.shape
+        rbf_vals = np.zeros((num_samples, size, len(centers)))
+        for k, center in enumerate(centers):
+            rbf_vals[:,:,k] = function((np.abs(x-center))/scale)
+    
+        return rbf_vals.reshape((num_samples, size*len(centers)))
+    return rbf
+
 def get_feature_scaler(trial, t_max=None):
-    t_max = t_max or trial.t_total
+    t_max = t_max or trial.t + 1
     mean_vec = np.zeros(len(trial.feature_names))
     std_vec = np.zeros(len(trial.feature_names))
     for j, feature_name in enumerate(trial.feature_names):
@@ -82,8 +93,10 @@ def get_optimization_terms(trial, state_encoding, discount):
         last_t = trial.num_treatments_applied(i)
         phi_s_next = None
         for t in range(last_t):
-            phi_s = phi_s_next if t > 0 else state_encoding(trial.S[i,t,:])
-            phi_s_next = state_encoding(trial.S[i,t+1,:]) if t < trial.T_dis[i] else 0
+            # Note: indexing with None adds back the patient dimension
+            # which would otherwise be lost when selecting patient i.
+            phi_s = phi_s_next if t > 0 else state_encoding(trial.S[None,i,t,:])
+            phi_s_next = state_encoding(trial.S[None,i,t+1,:]) if t < trial.T_dis[i] else 0
             
             feature_matrix[term_idx, :] = (
                 discount * phi_s_next - phi_s
@@ -124,7 +137,7 @@ def get_value_estimator(
     
         wt_feature_matrix = policy_probs[:,None] * feature_matrix
         wt_rewards = policy_probs * rewards
-    
+
         reg = Ridge(alpha=ridge_penalty, fit_intercept=False)
         reg.fit(-wt_feature_matrix, wt_rewards)
         return reg
@@ -132,13 +145,14 @@ def get_value_estimator(
     return value_estimator, feature_matrix/4, rewards/4
 
 if __name__ == "__main__":  
-    t_max = 200
+    t_max = 48
     n = 2000
-    dropout = True
+    dropout = False
     # trial = Gridworld(n, t_max)
     trial = dt.DiabetesTrial(n, t_max)
     feature_scaler = get_feature_scaler(trial)
-    encoding = lambda x : add_intercept(feature_scaler(x))
+    rbf = get_rbf()
+    encoding = lambda x : add_intercept(rbf(feature_scaler(x)))
     # encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
