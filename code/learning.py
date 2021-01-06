@@ -7,7 +7,7 @@ from Gridworld import Gridworld
 
 np.set_printoptions(precision=3)
 
-def intercept_adder(x):
+def add_intercept(x):
     n_dims = len(x.shape)
     if n_dims == 1:
         return np.array([1,*x])
@@ -23,6 +23,19 @@ def one_hot_y(x):
     for item_idx, y in enumerate(x[:,1]):
         encoded_state[item_idx, int(y)] = 1
     return encoded_state
+
+def get_feature_scaler(trial, t_max=None):
+    t_max = t_max or trial.t_total
+    mean_vec = np.zeros(len(trial.feature_names))
+    std_vec = np.zeros(len(trial.feature_names))
+    for j, feature_name in enumerate(trial.feature_names):
+        feature = trial.S[:,:t_max,trial.s_idx[feature_name]]
+        mean_vec[j], std_vec[j] = np.nanmean(feature), np.nanstd(feature)
+        
+    def feature_scaler(x):
+        return (x - mean_vec)/std_vec
+
+    return feature_scaler
 
 class Policy():
     
@@ -125,15 +138,17 @@ def get_value_estimator(
 
 if __name__ == "__main__":  
     t_max = 48
-    n = 200
+    n = 2000
     dropout = True
-    encoding = one_hot_y
-    trial = Gridworld(n, t_max)
-    # trial = dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n))
+    # trial = Gridworld(n, t_max)
+    trial = dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n))
+    feature_scaler = get_feature_scaler(trial)
+    encoding = lambda x : add_intercept(feature_scaler(x))
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
+    beta_0 = np.random.normal(scale=1, size=beta_0.shape)
     policy = Policy(beta_0, state_encoding=encoding)    
-    disc = 0
+    disc = 0.99
 
     for t in range(t_max):
         trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
@@ -144,7 +159,7 @@ if __name__ == "__main__":
     
     # Why are these different-- model misspecification?
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
-    mc_value_est = policy_eval_mc(policy,Gridworld(n, t_max), discount=disc, dropout=dropout)
+    mc_value_est = policy_eval_mc(policy,dt.DiabetesTrial(n, t_max, initial_states=dt.get_burned_in_states(n)), discount=disc, dropout=dropout)
     print(f"Est. value fn param: {theta_hat.round(3)}")
     print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
     print(f"Monte Carlo value estimate:                 {mc_value_est:10.3f}")
