@@ -86,9 +86,6 @@ class DiabetesTrial(trial.Trial):
     
     def _apply_dropout(self):
         dropout_probs = 0.2*expit(self.get_S("stress")-8) + 0.8 * 0.02
-        
-        #TEMPORARY CHANGE:
-        dropout_probs = dropout_probs * 0 + 0.2
         dropout_inds = np.random.binomial(1, dropout_probs)
         
         engaged_inds_before = self.engaged_inds.copy()

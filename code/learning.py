@@ -158,15 +158,15 @@ def get_value_estimator(
 
 if __name__ == "__main__":  
     t_max = 20
-    n = 300
-    dropout = False
+    n = 1000
+    dropout = True
     # trial = Gridworld(n, t_max)
     trial = dt.DiabetesTrial(n, t_max)
     feature_scaler = get_feature_scaler(trial)
-    rbf = get_rbf()
-    encoding = lambda x : add_intercept(feature_scaler(x))
+    # rbf = get_rbf()
+    # encoding = lambda x : add_intercept(add_interactions(feature_scaler(x)))
     # encoding = lambda x : np.ones(shape=(x.shape[0], 1))
-    # encoding = add_intercept
+    encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     # beta_0 = np.random.normal(scale=1, size=beta_0.shape)
@@ -176,20 +176,21 @@ if __name__ == "__main__":
     for t in range(t_max):
         trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
         trial.test_indexing()
+    print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
         
     value_estimator, w, r = get_value_estimator(trial, policy, discount=disc, ridge_penalty=0)
     reg = value_estimator(policy.beta)
     theta_hat = reg.coef_
     
-    # Why are these different-- model misspecification?
+    # Why are these different?
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     t_max2 = t_max*100
-    trial2 = dt.DiabetesTrial(n, t_total=t_max2)
+    trial2 = type(trial)(n, t_total=t_max2)
     for t in range(t_max2):
         trial2.step_forward_in_time(policy=policy, apply_dropout=dropout)
     mc_value_est = trial.get_returns(discount=disc).mean()
     mc_value_est2 = trial2.get_returns(discount=disc).mean()
     print(f"Est. value fn param: {theta_hat.round(3)}")
-    print(f"Avg estimated value across starting states: {value_est_at_t0:10.3f}")
-    print(f"Monte Carlo value estimate (t={t_max:4.0f}):        {mc_value_est:10.3f}")
-    print(f"Monte Carlo value estimate (t={t_max2:4.0f}):        {mc_value_est2:10.3f}")
+    print(f"Avg estimated value across starting states:     {value_est_at_t0:10.3f}")
+    print(f"In-sample  Monte Carlo value estimate (t={t_max:4.0f}): {mc_value_est:10.3f}")
+    print(f"Out-sample Monte Carlo value estimate (t={t_max2:4.0f}): {mc_value_est2:10.3f}")
