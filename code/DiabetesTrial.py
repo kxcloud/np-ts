@@ -48,21 +48,22 @@ class DiabetesTrial(trial.Trial):
     ]
     
     def __init__(self, n, t_total, initial_states=None, compute_extras=True, 
-            burn_in_policy=None
+            burn_in_policy=None, burn_in_steps=100
         ):
         self.burn_in_policy = burn_in_policy
+        if initial_states is None:
+            self.burn_in_steps = burn_in_steps
+        else:
+            self.burn_in_steps = "Already burned in."
         super().__init__(n, t_total, 
             initial_states=initial_states, compute_extras=compute_extras)
     
     def generate_initial_states(self):
-        """ 
-        """
-        burn_in_steps = 50
         initial_states = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
-        trial_burn = DiabetesTrial(n=self.n, t_total=burn_in_steps, 
+        trial_burn = DiabetesTrial(n=self.n, t_total=self.burn_in_steps, 
             initial_states=initial_states, compute_extras=False
         )
-        for t in range(burn_in_steps):
+        for t in range(self.burn_in_steps):
             trial_burn.step_forward_in_time(
                 self.burn_in_policy, apply_dropout=False
             )
@@ -85,6 +86,9 @@ class DiabetesTrial(trial.Trial):
     
     def _apply_dropout(self):
         dropout_probs = 0.2*expit(self.get_S("stress")-8) + 0.8 * 0.02
+        
+        #TEMPORARY CHANGE:
+        dropout_probs = dropout_probs * 0 + 0.2
         dropout_inds = np.random.binomial(1, dropout_probs)
         
         engaged_inds_before = self.engaged_inds.copy()
