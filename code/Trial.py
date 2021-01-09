@@ -217,5 +217,23 @@ class Trial:
         ax.set_xlabel(feature)
         ax.set_title(f"Distribution of {feature} across patients, time")
         plt.show()
-    
+        
+    def plot_returns(self, num_timesteps, discount=1):
+        fig, ax = plt.subplots()
+        
+        disc_returns = []
+        num_remaining = []
+        for t in range(num_timesteps):
+            disc_returns.append(np.nanmean(self.get_returns(discount,t_0=t)))
+            num_remaining.append((self.T_dis > t).sum())
+        
+        line1 = ax.plot(range(num_timesteps), disc_returns, c="C0")
+        ax2 = ax.twinx()
+        line2 = ax2.plot(range(num_timesteps), num_remaining, c="C1")
+        ax.set_title(f"Returns from {self}", fontsize=10)
+        ax.set_xlabel("Time (t)")
+        ax.set_ylabel(f"Avg. discounted ({discount}) future reward")
+        ax2.set_ylabel(f"Patients remaining")
+        ax.legend(line1+line2, ["Avg. discounted future return", 
+                                "Patients remaining"])
             

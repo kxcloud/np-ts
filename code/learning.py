@@ -3,6 +3,8 @@ from scipy.special import softmax
 from scipy.special import comb
 from sklearn.linear_model import Ridge
 
+import matplotlib.pyplot as plt
+
 import DiabetesTrial as dt
 from Gridworld import Gridworld
 
@@ -157,7 +159,7 @@ def get_value_estimator(
     return value_estimator, feature_matrix/4, rewards/4
 
 if __name__ == "__main__":  
-    t_max = 20
+    t_max = 100
     n = 1000
     dropout = True
     # trial = Gridworld(n, t_max)
@@ -165,8 +167,8 @@ if __name__ == "__main__":
     feature_scaler = get_feature_scaler(trial)
     # rbf = get_rbf()
     # encoding = lambda x : add_intercept(add_interactions(feature_scaler(x)))
-    # encoding = lambda x : np.ones(shape=(x.shape[0], 1))
-    encoding = add_intercept
+    encoding = lambda x : np.ones(shape=(x.shape[0], 1))
+    # encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     # beta_0 = np.random.normal(scale=1, size=beta_0.shape)
@@ -188,9 +190,12 @@ if __name__ == "__main__":
     trial2 = type(trial)(n, t_total=t_max2)
     for t in range(t_max2):
         trial2.step_forward_in_time(policy=policy, apply_dropout=dropout)
-    mc_value_est = trial.get_returns(discount=disc).mean()
-    mc_value_est2 = trial2.get_returns(discount=disc).mean()
+    mc_value_est = np.nanmean(trial.get_returns(discount=disc))
+    mc_value_est2 = np.nanmean(trial2.get_returns(discount=disc))
     print(f"Est. value fn param: {theta_hat.round(3)}")
-    print(f"Avg estimated value across starting states:     {value_est_at_t0:10.3f}")
-    print(f"In-sample  Monte Carlo value estimate (t={t_max:4.0f}): {mc_value_est:10.3f}")
-    print(f"Out-sample Monte Carlo value estimate (t={t_max2:4.0f}): {mc_value_est2:10.3f}")
+    print(f"Avg estimated value across starting states:      {value_est_at_t0:10.3f}")
+    print(f"In-sample  Monte Carlo value estimate (t={t_max:5.0f}): {mc_value_est:10.3f}")
+    print(f"Out-sample Monte Carlo value estimate (t={t_max2:5.0f}): {mc_value_est2:10.3f}")
+    
+    trial.plot_returns(num_timesteps=20, discount=disc)
+    trial2.plot_returns(num_timesteps=20, discount=disc)
