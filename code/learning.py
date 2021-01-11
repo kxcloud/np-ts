@@ -143,9 +143,69 @@ def get_value_estimator(
         
     return value_estimator, policy_loss
 
+def get_value_estimator_frontloaded(
+        trial, policy, discount, bootstrap_weights = None, verbose=True
+    ):
+    """ 
+    Precompute terms for value function estimation, then return a function
+    which takes a policy parameter and returns the estimated value.
+    """
+
+    # Precompute as much as possible.
+    psi_S = [
+        policy.state_encoding(trial.S[i,:trial.last_time_index(i)+1]) 
+        for i in range(trial.n)
+    ]
+    bootstrap_weights = (
+        np.ones(trial.n) if bootstrap_weights is None else bootstrap_weights
+    )
+    p = trial.infer_encoding_size(policy.state_encoding)
+    n_actions = [trial.num_treatments_applied(i) for i in range(trial.n)]
+    actions = [trial.A[i,:n_actions[i]].astype(int) for i in range(trial.n)]
+    
+    # The probability-weighed sum of these terms form the A and b in Ax=b.
+    matrix_summands = [np.zeros((n_actions[i], p, p)) for i in range(trial.n)]
+    vector_summands = [np.zeros((n_actions[i], p)) for i in range(trial.n)]
+    for i in range(trial.n):         
+        for t in range(n_actions[i]):
+            psi_s = psi_S[i][t]
+            psi_s_next = psi_S[i][t+1] if t < trial.T_dis[i] else 0
+            matrix_summands[i][t,:,:] = np.outer(
+                (bootstrap_weights[i] / trial.A_prob[i,t]) * psi_s,
+                psi_s - discount * psi_s_next
+            )
+            
+            vector_summands[i][t,:] = (trial.R[i,t]/trial.A_prob[i,t]) * psi_s
+        
+    def value_estimator(policy_param):
+        """ 
+        Estimate the value for the policy given by policy_param. Returns 
+        fitted scikit-learn regression object.
+        """
+        policy = Policy(beta_0=policy_param)
+        feature_matrix = np.zeros((p, p), dtype=float)
+        reward_vector = np.zeros(p, dtype=float)
+    
+        for i in range(trial.n):
+            policy_probs = get_policy_probs(policy, psi_S[i], actions[i]) #TODO: vectorize this across patients?
+            feature_matrix += np.tensordot(policy_probs, matrix_summands[i], axes=(0,0))
+            reward_vector += np.tensordot(policy_probs, vector_summands[i], axes=(0,0))
+        
+        theta_hat = np.linalg.solve(feature_matrix, reward_vector)
+        return theta_hat
+    
+    psi_S_0 = policy.state_encoding(trial.S[:,0,:])
+    
+    def policy_loss(policy_param, penalty=1):
+        theta_hat = value_estimator(policy_param.reshape(policy.beta.shape))
+        mean_value = np.mean(psi_S_0 @ theta_hat)
+        return -mean_value + penalty * np.sum(policy_param**2)
+        
+    return value_estimator, policy_loss
+
 if __name__ == "__main__":
-    t_max = 20
-    n = 100
+    t_max = 80
+    n = 50
     dropout = True
     trial = dt.DiabetesTrial(n, t_max)
     # trial = Gridworld(n, t_max)
@@ -160,15 +220,35 @@ if __name__ == "__main__":
     policy = Policy(beta_0, state_encoding=encoding)    
     disc = 0.95
 
-    for t in range(10):
+    for t in range(t_max):
         trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
     
-    value_estimator, policy_loss = get_value_estimator(trial, policy, disc)
-    theta_hat = value_estimator(beta_0)
+    import time
+    
+    for val_getter in [get_value_estimator_frontloaded, get_value_estimator]:
+        start_1 = time.time()
+        value_estimator, policy_loss = val_getter(trial, policy, disc)
+        theta_hat = value_estimator(beta_0)
+        get_duration = time.time() - start_1
+        print(f"{get_duration:0.2f}s to construct value estimator.")
 
-    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-2, 'disp':True})
+        start = time.time()
+        result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-3, 'disp':True})
+        duration = time.time() - start
+        print(f"{duration:0.2f}s for {result.nfev} evals; {100*duration/result.nfev:0.2f}s per 100 evals")
+        duration = duration + get_duration
+        print(f"Total: {duration:0.2f}s for {result.nfev} evals; {100*duration/result.nfev:0.2f}s per 100 evals")
+        print("")
+    
+    # n = 50, t = 20 -> 0.58s / 1.39s per 100 evals
+    # n = 100, t = 20 -> 1.18s / 2.84s per 100 evals
+    # n = 1000, t = 20 -> 11.55s / 28.96s per 100 evals
+    # n = 50, t = 40 -> 0.63s / 2.11s per 100 evals
+    # n = 50, t = 80 -> 0.68s / 2.83s per 100 evals
+    # Note: dropout means lower differences. 
+    
     beta_hat = result.x.reshape(beta_0.shape)
     est_opt_val = -result.fun # Doesn't account for penalty.
     
@@ -191,5 +271,5 @@ if __name__ == "__main__":
     for t in range(t_max2):
         trial3.step_forward_in_time(policy=est_policy, apply_dropout=dropout)
     mc_value_est3 = trial3.get_returns(discount=disc).mean()
-    print(f"Optimal policy value estimate (t={t_max2:5.0f}):       {mc_value_est3:10.3f}")
+    print(f"Optimal policy value estimate (t={t_max2:5.0f}):         {mc_value_est3:10.3f}")
     
