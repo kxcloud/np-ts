@@ -1,9 +1,6 @@
 import numpy as np
 from scipy.special import softmax
 from scipy.special import comb
-from sklearn.linear_model import Ridge
-
-import matplotlib.pyplot as plt
 
 import DiabetesTrial as dt
 from Gridworld import Gridworld
@@ -84,43 +81,7 @@ class Policy():
        
     def copy(self):
         return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
-        
-
-def get_optimization_terms(trial, state_encoding, discount):
-    """ 
-    Get feature matrix, reward vector, and other components for quick value 
-    estimation and policy optimization. Includes weighting by behavior policy 
-    but NOT by target.
-    """
-    total_num_actions_taken = 0
-    for i in range(trial.n):
-        total_num_actions_taken += trial.num_treatments_applied(i)
     
-    encoding_size = trial.infer_encoding_size(state_encoding)
-    
-    feature_matrix = np.zeros((total_num_actions_taken, encoding_size), dtype=np.float64)
-    rewards = np.zeros((total_num_actions_taken), dtype=np.float64)
-    encoded_states = np.zeros((total_num_actions_taken, encoding_size))
-    actions = np.zeros((total_num_actions_taken), dtype=int)
-    term_idx = 0
-    for i in range(trial.n):
-        last_t = trial.num_treatments_applied(i)
-        phi_s_next = None
-        for t in range(last_t):
-            # Note: indexing with None adds back the patient dimension which 
-            # would otherwise be lost when selecting patient i.
-            phi_s = phi_s_next if t > 0 else state_encoding(trial.S[None,i,t,:])
-            phi_s_next = state_encoding(trial.S[None,i,t+1,:]) if t < trial.T_dis[i] else 0
-            
-            feature_matrix[term_idx, :] = (
-                phi_s - discount * phi_s_next
-            ) / trial.A_prob[i, t]
-            rewards[term_idx] = trial.R[i,t] / trial.A_prob[i, t]
-            encoded_states[term_idx] = phi_s
-            actions[term_idx] = int(trial.A[i,t])
-            term_idx += 1
-
-    return feature_matrix, rewards, encoded_states, actions
 
 def get_policy_probs(policy, encoded_states, actions):
     all_action_probs = policy.act(encoded_states, apply_encoding=False)
@@ -131,15 +92,19 @@ def get_policy_probs(policy, encoded_states, actions):
     return selected_action_probs
 
 def get_value_estimator(
-        trial, 
-        policy, 
-        discount, 
-        ridge_penalty=0
+        trial, policy, discount, bootstrap_weights = None
     ):
-    feature_matrix, rewards, encoded_states, actions = get_optimization_terms(
-        trial, policy.state_encoding, discount
-    )
+    """ 
+    Precompute terms for value function estimation, then return a function
+    which takes a policy parameter and returns the estimated value.
+    """
+    psi_S = [
+        encoding(trial.S[i,:trial.last_time_index(i)+1]) 
+        for i in range(trial.n)
+    ]
+    bootstrap_weights = bootstrap_weights or np.ones(trial.n)
     policy = policy.copy()
+    encoding_size = trial.infer_encoding_size(encoding)
     
     def value_estimator(policy_param):
         """ 
@@ -147,28 +112,42 @@ def get_value_estimator(
         fitted scikit-learn regression object.
         """
         policy.beta = policy_param
-        policy_probs = get_policy_probs(policy, encoded_states, actions)
+        
+        feature_matrix = np.zeros((encoding_size, encoding_size), dtype=float)
+        reward_vector = np.zeros(encoding_size, dtype=float)
     
-        wt_feature_matrix = policy_probs[:,None] * feature_matrix
-        wt_rewards = policy_probs * rewards
-
-        reg = Ridge(alpha=ridge_penalty, fit_intercept=False)
-        reg.fit(wt_feature_matrix, wt_rewards)
-        return reg
+        for i in range(trial.n):         
+            n_actions = trial.num_treatments_applied(i)
+            actions = trial.A[i,:n_actions].astype(int)
+            policy_probs = get_policy_probs(policy, psi_S[i], actions)
+            for t in range(n_actions):
+                psi_s = psi_S[i][t]
+                psi_s_next = psi_S[i][t+1] if t < trial.T_dis[i] else 0
+            
+                imp_sample_wt = policy_probs[t] / trial.A_prob[i,t]
+                
+                feature_matrix += np.outer(
+                    (imp_sample_wt * bootstrap_weights[i]) * psi_s,
+                    psi_s - discount * psi_s_next 
+                )
+                
+                reward_vector += (imp_sample_wt * trial.R[i,t]) * psi_s
+        theta_hat = np.linalg.solve(feature_matrix, reward_vector)
+        return theta_hat
     
-    return value_estimator, feature_matrix/4, rewards/4
+    return value_estimator
 
-if __name__ == "__main__":  
-    t_max = 100
+if __name__ == "__main__":
+    t_max = 20
     n = 1000
     dropout = True
-    # trial = Gridworld(n, t_max)
     trial = dt.DiabetesTrial(n, t_max)
-    feature_scaler = get_feature_scaler(trial)
+    # trial = Gridworld(n, t_max)
+    # feature_scaler = get_feature_scaler(trial)
     # rbf = get_rbf()
     # encoding = lambda x : add_intercept(add_interactions(feature_scaler(x)))
-    encoding = lambda x : np.ones(shape=(x.shape[0], 1))
-    # encoding = add_intercept
+    # encoding = lambda x : np.ones(shape=(x.shape[0], 1))
+    encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     # beta_0 = np.random.normal(scale=1, size=beta_0.shape)
@@ -179,12 +158,10 @@ if __name__ == "__main__":
         trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
-        
-    value_estimator, w, r = get_value_estimator(trial, policy, discount=disc, ridge_penalty=0)
-    reg = value_estimator(policy.beta)
-    theta_hat = reg.coef_
     
-    # Why are these different?
+    value_estimator = get_value_estimator(trial, policy, disc)
+    theta_hat = value_estimator(beta_0)
+
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     t_max2 = t_max*100
     trial2 = type(trial)(n, t_total=t_max2)
@@ -196,6 +173,3 @@ if __name__ == "__main__":
     print(f"Avg estimated value across starting states:      {value_est_at_t0:10.3f}")
     print(f"In-sample  Monte Carlo value estimate (t={t_max:5.0f}): {mc_value_est:10.3f}")
     print(f"Out-sample Monte Carlo value estimate (t={t_max2:5.0f}): {mc_value_est2:10.3f}")
-    
-    trial.plot_returns(num_timesteps=20, discount=disc)
-    trial2.plot_returns(num_timesteps=20, discount=disc)
