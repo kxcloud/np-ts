@@ -161,9 +161,13 @@ class DiabetesTrial(trial.Trial):
         Composite reward for exercise and avoiding unhealthy eating. Small
         penalty for disengaging.
         """
+        glucose = self.get_S("glucose")
+        
         self.R[self.engaged_inds, self.t] = (
             self.get_S("exercise", self.t+1) / 800 
-            - self.get_S("unhealthy_ind", self.t+1)
+            - self.get_S("unhealthy_ind", self.t+1) 
+            - (glucose < 80)
+            - (glucose > 120)
         )
         
         self.R[self.T_dis == self.t, self.t] = -0.5

@@ -112,7 +112,6 @@ def get_value_estimator(
         fitted scikit-learn regression object.
         """
         policy = Policy(beta_0=policy_param)
-        
         feature_matrix = np.zeros((encoding_size, encoding_size), dtype=float)
         reward_vector = np.zeros(encoding_size, dtype=float)
     
@@ -137,16 +136,16 @@ def get_value_estimator(
     
     psi_S_0 = policy.state_encoding(trial.S[:,0,:])
     
-    def policy_loss(policy_param, penalty=0.1):
+    def policy_loss(policy_param, penalty=1):
         theta_hat = value_estimator(policy_param.reshape(policy.beta.shape))
         mean_value = np.mean(psi_S_0 @ theta_hat)
-        return -mean_value + np.sum(policy_param**2)
+        return  -mean_value + penalty * np.sum(policy_param**2)
         
     return value_estimator, policy_loss
 
 if __name__ == "__main__":
     t_max = 20
-    n = 1000
+    n = 100
     dropout = True
     trial = dt.DiabetesTrial(n, t_max)
     # trial = Gridworld(n, t_max)
@@ -171,7 +170,8 @@ if __name__ == "__main__":
 
     result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-2, 'disp':True})
     beta_hat = result.x.reshape(beta_0.shape)
-
+    est_opt_val = -result.fun # Doesn't account for penalty.
+    
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     t_max2 = t_max*100
     trial2 = type(trial)(n, t_total=t_max2)
@@ -183,3 +183,13 @@ if __name__ == "__main__":
     print(f"Avg estimated value across starting states:      {value_est_at_t0:10.3f}")
     print(f"In-sample  Monte Carlo value estimate (t={t_max:5.0f}): {mc_value_est:10.3f}")
     print(f"Out-sample Monte Carlo value estimate (t={t_max2:5.0f}): {mc_value_est2:10.3f}")
+    
+    est_policy = Policy(beta_hat, state_encoding=encoding)
+    
+    t_max2 = t_max*100
+    trial3 = type(trial)(n, t_total=t_max2)
+    for t in range(t_max2):
+        trial3.step_forward_in_time(policy=est_policy, apply_dropout=dropout)
+    mc_value_est3 = trial3.get_returns(discount=disc).mean()
+    print(f"Optimal policy value estimate (t={t_max2:5.0f}):       {mc_value_est3:10.3f}")
+    
