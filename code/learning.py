@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.special import softmax
 from scipy.special import comb
+from scipy.optimize import minimize
 
 import DiabetesTrial as dt
 from Gridworld import Gridworld
@@ -99,19 +100,18 @@ def get_value_estimator(
     which takes a policy parameter and returns the estimated value.
     """
     psi_S = [
-        encoding(trial.S[i,:trial.last_time_index(i)+1]) 
+        policy.state_encoding(trial.S[i,:trial.last_time_index(i)+1]) 
         for i in range(trial.n)
     ]
     bootstrap_weights = bootstrap_weights or np.ones(trial.n)
-    policy = policy.copy()
-    encoding_size = trial.infer_encoding_size(encoding)
+    encoding_size = trial.infer_encoding_size(policy.state_encoding)
     
     def value_estimator(policy_param):
         """ 
         Estimate the value for the policy given by policy_param. Returns 
         fitted scikit-learn regression object.
         """
-        policy.beta = policy_param
+        policy = Policy(beta_0=policy_param)
         
         feature_matrix = np.zeros((encoding_size, encoding_size), dtype=float)
         reward_vector = np.zeros(encoding_size, dtype=float)
@@ -135,7 +135,14 @@ def get_value_estimator(
         theta_hat = np.linalg.solve(feature_matrix, reward_vector)
         return theta_hat
     
-    return value_estimator
+    psi_S_0 = policy.state_encoding(trial.S[:,0,:])
+    
+    def policy_loss(policy_param, penalty=0.1):
+        theta_hat = value_estimator(policy_param.reshape(policy.beta.shape))
+        mean_value = np.mean(psi_S_0 @ theta_hat)
+        return -mean_value + np.sum(policy_param**2)
+        
+    return value_estimator, policy_loss
 
 if __name__ == "__main__":
     t_max = 20
@@ -143,24 +150,27 @@ if __name__ == "__main__":
     dropout = True
     trial = dt.DiabetesTrial(n, t_max)
     # trial = Gridworld(n, t_max)
-    # feature_scaler = get_feature_scaler(trial)
+    feature_scaler = get_feature_scaler(trial)
     # rbf = get_rbf()
-    # encoding = lambda x : add_intercept(add_interactions(feature_scaler(x)))
+    encoding = lambda x : add_intercept(feature_scaler(x))
     # encoding = lambda x : np.ones(shape=(x.shape[0], 1))
-    encoding = add_intercept
+    # encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     # beta_0 = np.random.normal(scale=1, size=beta_0.shape)
     policy = Policy(beta_0, state_encoding=encoding)    
     disc = 0.95
 
-    for t in range(t_max):
+    for t in range(10):
         trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
     
-    value_estimator = get_value_estimator(trial, policy, disc)
+    value_estimator, policy_loss = get_value_estimator(trial, policy, disc)
     theta_hat = value_estimator(beta_0)
+
+    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-2, 'disp':True})
+    beta_hat = result.x.reshape(beta_0.shape)
 
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     t_max2 = t_max*100
