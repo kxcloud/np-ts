@@ -93,7 +93,8 @@ def get_policy_probs(policy, encoded_states, actions):
     return selected_action_probs
 
 def get_value_estimator(
-        trial, policy, discount, bootstrap_weights = None, verbose=True
+        trial, policy, discount, bootstrap_weights = None,
+        policy_penalty=0, verbose=True
     ):
     """ 
     Precompute terms for value function estimation, then return a function
@@ -145,10 +146,10 @@ def get_value_estimator(
     
     psi_S_0 = policy.state_encoding(trial.S[:,0,:])
     
-    def policy_loss(policy_param, penalty=1):
+    def policy_loss(policy_param):
         theta_hat = value_estimator(policy_param.reshape(policy.beta.shape))
         mean_value = np.mean(psi_S_0 @ theta_hat)
-        return -mean_value + penalty * np.sum(policy_param**2)
+        return -mean_value + policy_penalty * np.sum(policy_param**2)
         
     return value_estimator, policy_loss
 
