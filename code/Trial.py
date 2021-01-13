@@ -197,15 +197,17 @@ class Trial:
         print(f"Inferred state encoding size: {encoding_size}.")
         return encoding_size
         
-    def plot_feature_over_time(self, 
-                               feature, 
-                               num_to_plot=10, 
-                               tmax=None,
-                               hlines=[],
-                               subtitle=""):
+    def plot_feature(self, 
+            feature, 
+            num_to_plot=10, 
+            t_max=None,
+            hlines=[],
+            ylim=None,
+            subtitle=""
+        ):
         num_to_plot = self.n if num_to_plot is None else num_to_plot
-        tmax = self.t_total if tmax is None else tmax
-        feature_over_time = self.S[range(num_to_plot),:tmax,self.s_idx[feature]]
+        t_max = self.t_total if t_max is None else t_max
+        feature_over_time = self.S[range(num_to_plot),:t_max,self.s_idx[feature]]
         fig, ax = plt.subplots()
         for value in hlines:
             ax.axhline(y=value, ls="--", lw=1, color="gray")
@@ -213,6 +215,8 @@ class Trial:
         title = f"Patient {feature} over time"
         if subtitle:
             title += "\n" + subtitle
+        if ylim is not None:
+            ax.set_ylim(ylim)
         ax.set_title(title)
         ax.set_xlabel("time")
         ax.set_ylabel(feature)
