@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from scipy.special import softmax
 from scipy.special import comb
 from scipy.optimize import minimize
@@ -6,6 +7,7 @@ from scipy.optimize import minimize
 import DiabetesTrial as dt
 from Gridworld import Gridworld
 
+pd.options.display.width = 0
 np.set_printoptions(precision=3)
 
 def add_intercept(x):
@@ -135,13 +137,13 @@ def get_value_estimator(
         policy = Policy(beta_0=policy_param)
         feature_matrix = np.zeros((p, p), dtype=float)
         reward_vector = np.zeros(p, dtype=float)
-    
+        
         for i in range(trial.n):
             policy_probs = get_policy_probs(policy, psi_S[i], actions[i]) #TODO: vectorize this across patients?
             feature_matrix += np.tensordot(policy_probs, matrix_summands[i], axes=(0,0))
             reward_vector += np.tensordot(policy_probs, vector_summands[i], axes=(0,0))
-        
-        theta_hat = np.linalg.solve(feature_matrix, reward_vector)
+
+        theta_hat = np.linalg.solve(feature_matrix/trial.n, reward_vector/trial.n)
         return theta_hat
     
     psi_S_0 = policy.state_encoding(trial.S[:,0,:])
@@ -175,17 +177,18 @@ if __name__ == "__main__":
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
                 
-    value_estimator, policy_loss = get_value_estimator(trial, policy, disc)
+    value_estimator, policy_loss = get_value_estimator(trial, policy, disc, policy_penalty=2)
     theta_hat = value_estimator(beta_0)
 
-    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-3, 'disp':True})
+    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-5, 'disp':True})
     
     beta_hat = result.x.reshape(beta_0.shape)
     est_opt_val = -result.fun # Note: doesn't account for penalty.
+
     
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     t_max2 = t_max*100
-    trial2 = type(trial)(n, t_total=t_max2)
+    trial2 = type(trial)(n*10, t_total=t_max2)
     for t in range(t_max2):
         trial2.step_forward_in_time(policy=policy, apply_dropout=dropout)
     mc_value_est = np.nanmean(trial.get_returns(discount=disc))
@@ -197,9 +200,18 @@ if __name__ == "__main__":
     
     est_policy = Policy(beta_hat, state_encoding=encoding)
     t_max2 = t_max*100
-    trial3 = type(trial)(n, t_total=t_max2)
+    trial3 = type(trial)(n*10, t_total=t_max2)
     for t in range(t_max2):
         trial3.step_forward_in_time(policy=est_policy, apply_dropout=dropout)
     mc_value_est3 = trial3.get_returns(discount=disc).mean()
     print(f"Optimal policy value estimate (t={t_max2:5.0f}):         {mc_value_est3:10.3f}")
+    
+    
+    ylim = (dt.gluc_min, dt.gluc_max)
+    trial2.plot_feature("glucose", hlines=[70,80,120,150], t_max=50, ylim=ylim,
+                        subtitle="(Behavior policy: uniform random)")
+    trial3.plot_feature("glucose", hlines=[70,80,120,150], t_max=50, ylim=ylim,
+                        subtitle="(Learned policy)")
+    
+    print(trial3.get_patient_table(0).round(2))
     
