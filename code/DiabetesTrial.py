@@ -163,11 +163,14 @@ class DiabetesTrial(trial.Trial):
         """
         glucose = self.get_S("glucose")
         
+        # Rewards for glucose levels from V-learning simulations.
         self.R[self.engaged_inds, self.t] = (
-            self.get_S("exercise", self.t+1) / 800 
-            - self.get_S("unhealthy_ind", self.t+1) 
+            # self.get_S("exercise", self.t+1) / 800 
+            # - self.get_S("unhealthy_ind", self.t+1) 
+            - 2*(glucose < 70)
             - (glucose < 80)
             - (glucose > 120)
+            - (glucose > 150)
         )
         
         self.R[self.T_dis == self.t, self.t] = -0.5
