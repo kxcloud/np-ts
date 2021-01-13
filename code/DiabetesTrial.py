@@ -8,7 +8,7 @@ a_idx = {"insulin" : 0, "message" : 1}
 gluc_mean = 100
 gluc_std = 5.5
 gluc_state_effect = {
-   "glucose": 0.9,
+   "glucose": 0.95,
    "calories" : 0.1,
    "calories-1" : 0.1,
    "exercise": -0.01,
@@ -25,6 +25,7 @@ stress_min, stress_max = (0, 15)
 class DiabetesTrial(trial.Trial):
     # Feature values at time t describe the time period (t-1,t]
     feature_names = [
+        "glucose",
         "stress",
         "fatigue",
         "unhealthy_ind",
@@ -35,8 +36,7 @@ class DiabetesTrial(trial.Trial):
         "calories-3",
         "exercise",
         "exercise-1",
-        "glucose",
-        "insulin-1"
+        "insulin-1",
     ]
     
     # Define what action indexes refer to.
@@ -59,7 +59,7 @@ class DiabetesTrial(trial.Trial):
             initial_states=initial_states, compute_extras=compute_extras)
     
     def generate_initial_states(self):
-        initial_states = [stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, gluc_mean, 0]
+        initial_states = [gluc_mean, stress_mean, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         trial_burn = DiabetesTrial(n=self.n, t_total=self.burn_in_steps, 
             initial_states=initial_states, compute_extras=False
         )
@@ -124,7 +124,7 @@ class DiabetesTrial(trial.Trial):
         
         expit_stress = expit((self.get_S("stress") - 7)/4) 
                 
-        eat_ind = np.random.binomial(1, 0.1 + 0.3*expit_stress, size=n_engaged)
+        eat_ind = np.random.binomial(1, 0.4 + 0.3*expit_stress, size=n_engaged)
         unhealthy_snack_ind = (
             eat_ind * np.random.binomial(1, expit_stress, size=n_engaged)
         )
@@ -174,7 +174,33 @@ class DiabetesTrial(trial.Trial):
         )
         
         self.R[self.T_dis == self.t, self.t] = -0.5
-           
+        
+    def get_patient_table(self, i):
+        """ Return observations for patient i as a DataFrame. """
+        table = super().get_patient_table(i)
+        
+        num_actions = self.num_treatments_applied(i)
+        A = self.A[i, :num_actions].astype(int)
+        A_prob = self.A_prob[i, :num_actions]
+        R = self.R[i, :self.last_time_index(i)+1]
+        
+        insulin = np.zeros(self.last_time_index(i)+1, dtype=int)
+        message = np.zeros(self.last_time_index(i)+1, dtype=int)
+        a_prob = np.full(self.last_time_index(i)+1, np.nan, dtype=float)
+        r = np.full(self.last_time_index(i)+1, np.nan, dtype=float)
+        
+        for t, (action, action_prob) in enumerate(zip(A, A_prob)):
+            indicators = self.action_space[action]
+            insulin[t] = indicators[a_idx["insulin"]]
+            message[t] = indicators[a_idx["message"]]
+            a_prob[t] = action_prob
+            r[t] = R[t]
+        
+        table["a:insulin"] = insulin
+        table["a:message"] = message
+        table["p"] = a_prob
+        table["r"] = r
+        return table
 
 if __name__ == "__main__":
     t_max = 15  
