@@ -62,6 +62,7 @@ def get_feature_scaler(trial, t_max=None):
 
     return feature_scaler
 
+
 class Policy():
     
     def __init__(self, beta_0, state_encoding=None):
@@ -84,7 +85,48 @@ class Policy():
        
     def copy(self):
         return Policy(beta_0=self.beta, state_encoding = self.state_encoding)
+
+
+class SimpleInsulinPolicy():
     
+    def act(self, states, apply_encoding=None):
+        action_probs = np.zeros((states.shape[0], 4))
+        for i, state in enumerate(states):
+            glucose = state[0]
+            if glucose > 100:
+                action_probs[i, 1] = 1
+            else:
+                action_probs[i, 0] = 1
+        return action_probs
+
+def mc_value_est(
+        policy, 
+        discount,
+        apply_dropout,
+        new_trial=None, 
+        trial_type=None, 
+        n=1000,
+        t_total=1000, 
+    ):
+    """ Evaluate a policy by running it on a new trial. """
+    
+    assert_msg = "Pass either a new trial to run or a trial type to create."
+    assert (new_trial is None) + (trial_type is None) == 1, assert_msg
+    
+    if new_trial is None:
+        sim_trial = trial_type(n, t_total)
+    else:
+        sim_trial = new_trial
+        n = new_trial.n
+        t_total = new_trial.t_total
+        
+    for t in range(t_total):
+        sim_trial.step_forward_in_time(policy, apply_dropout=apply_dropout)
+    
+    returns = sim_trial.get_returns(discount=discount)
+    mean = returns.mean()
+    ci_width = 1.96 * returns.std() / np.sqrt(n)
+    return mean, ci_width
 
 def get_policy_probs(policy, encoded_states, actions):
     all_action_probs = policy.act(encoded_states, apply_encoding=False)
@@ -122,6 +164,7 @@ def get_value_estimator(
         for t in range(n_actions[i]):
             psi_s = psi_S[i][t]
             psi_s_next = psi_S[i][t+1] if t < trial.T_dis[i] else 0
+            
             matrix_summands[i][t,:,:] = np.outer(
                 (bootstrap_weights[i] / trial.A_prob[i,t]) * psi_s,
                 psi_s - discount * psi_s_next
@@ -142,7 +185,6 @@ def get_value_estimator(
             policy_probs = get_policy_probs(policy, psi_S[i], actions[i]) #TODO: vectorize this across patients?
             feature_matrix += np.tensordot(policy_probs, matrix_summands[i], axes=(0,0))
             reward_vector += np.tensordot(policy_probs, vector_summands[i], axes=(0,0))
-
         theta_hat = np.linalg.solve(feature_matrix/trial.n, reward_vector/trial.n)
         return theta_hat
     
@@ -156,14 +198,14 @@ def get_value_estimator(
     return value_estimator, policy_loss
 
 if __name__ == "__main__":
-    t_max = 50
-    n = 200
+    t_max = 48
+    n = 2000
     dropout = True
     trial = dt.DiabetesTrial(n, t_max)
     # trial = Gridworld(n, t_max)
     feature_scaler = get_feature_scaler(trial)
-    # rbf = get_rbf()
-    encoding = lambda x : add_intercept(feature_scaler(x))
+    rbf = get_rbf()
+    encoding = lambda x : add_intercept(rbf(feature_scaler(x)))
     # encoding = lambda x : np.ones(shape=(x.shape[0], 1))
     # encoding = add_intercept
     n_actions = len(trial.action_space)
@@ -177,41 +219,45 @@ if __name__ == "__main__":
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
                 
-    value_estimator, policy_loss = get_value_estimator(trial, policy, disc, policy_penalty=2)
+    value_estimator, policy_loss = get_value_estimator(trial, policy, disc, policy_penalty=0.5)
     theta_hat = value_estimator(beta_0)
 
     result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-5, 'disp':True})
     
     beta_hat = result.x.reshape(beta_0.shape)
     est_opt_val = -result.fun # Note: doesn't account for penalty.
-
-    
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
-    t_max2 = t_max*100
-    trial2 = type(trial)(n*10, t_total=t_max2)
-    for t in range(t_max2):
-        trial2.step_forward_in_time(policy=policy, apply_dropout=dropout)
-    mc_value_est = np.nanmean(trial.get_returns(discount=disc))
-    mc_value_est2 = np.nanmean(trial2.get_returns(discount=disc))
+    mc_value = trial.get_returns(discount=disc).mean()
     print(f"Est. value fn param: {theta_hat.round(3)}")
-    print(f"Avg estimated value across starting states:      {value_est_at_t0:10.3f}")
-    print(f"In-sample  Monte Carlo value estimate (t={t_max:5.0f}): {mc_value_est:10.3f}")
-    print(f"Out-sample Monte Carlo value estimate (t={t_max2:5.0f}): {mc_value_est2:10.3f}")
+    print(f"{'Avg estimated value across starting states:':<50} {value_est_at_t0:8.2f}")
+    print(f"{'Uniform policy in-sample MC value estimate:':<50} {mc_value:8.2f}")
     
     est_policy = Policy(beta_hat, state_encoding=encoding)
-    t_max2 = t_max*100
-    trial3 = type(trial)(n*10, t_total=t_max2)
-    for t in range(t_max2):
-        trial3.step_forward_in_time(policy=est_policy, apply_dropout=dropout)
-    mc_value_est3 = trial3.get_returns(discount=disc).mean()
-    print(f"Optimal policy value estimate (t={t_max2:5.0f}):         {mc_value_est3:10.3f}")
     
+    # Monte Carlo evaluations
+    trials = {}
+    policies = {
+        "Uniform" : policy,
+        "Estimated" : est_policy,
+        "Expert" : SimpleInsulinPolicy()
+    }
     
+    for label, pol in policies.items():
+        newtrial = type(trial)(n=5000, t_total=500)
+        mc_value, mc_std = mc_value_est(pol, disc, new_trial=newtrial, apply_dropout=dropout)
+        trials[label] = newtrial
+        printstr = label + " policy out-of-sample MC value estimate:"
+        print(f"{printstr:<50} {mc_value:8.2f} ± {mc_std:2.2f}")
+        
     ylim = (dt.gluc_min, dt.gluc_max)
-    trial2.plot_feature("glucose", hlines=[70,80,120,150], t_max=50, ylim=ylim,
-                        subtitle="(Behavior policy: uniform random)")
-    trial3.plot_feature("glucose", hlines=[70,80,120,150], t_max=50, ylim=ylim,
-                        subtitle="(Learned policy)")
-    
-    print(trial3.get_patient_table(0).round(2))
+    for label, newtrial in trials.items():
+        newtrial.plot_feature(
+            "glucose", 
+            hlines=[70,80,120,150], 
+            t_max=50, 
+            ylim=ylim,
+            subtitle=f"({label} policy)"
+        )
+
+    print(trials["Estimated"].get_patient_table(0).round(2))
     
