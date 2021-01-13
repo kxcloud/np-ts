@@ -201,7 +201,8 @@ class Trial:
                                feature, 
                                num_to_plot=10, 
                                tmax=None,
-                               hlines=[]):
+                               hlines=[],
+                               subtitle=""):
         num_to_plot = self.n if num_to_plot is None else num_to_plot
         tmax = self.t_total if tmax is None else tmax
         feature_over_time = self.S[range(num_to_plot),:tmax,self.s_idx[feature]]
@@ -209,7 +210,10 @@ class Trial:
         for value in hlines:
             ax.axhline(y=value, ls="--", lw=1, color="gray")
         ax.plot(feature_over_time.T)
-        ax.set_title(f"Patient {feature} over time")
+        title = f"Patient {feature} over time"
+        if subtitle:
+            title += "\n" + subtitle
+        ax.set_title(title)
         ax.set_xlabel("time")
         ax.set_ylabel(feature)
         plt.show()
