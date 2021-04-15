@@ -6,6 +6,7 @@ from scipy.optimize import minimize
 
 import DiabetesTrial as dt
 from Gridworld import Gridworld
+from BanditTrial import BanditTrial
 
 pd.options.display.width = 0
 np.set_printoptions(precision=3)
@@ -199,47 +200,55 @@ def get_value_estimator(
 
 if __name__ == "__main__":
     t_max = 48
-    n = 2000
-    dropout = True
+    n = 200
+    dropout = False
     trial = dt.DiabetesTrial(n, t_max)
     # trial = Gridworld(n, t_max)
+    # trial = BanditTrial(n, t_max, p=5, num_actions=2)
     feature_scaler = get_feature_scaler(trial)
     rbf = get_rbf()
-    encoding = lambda x : add_intercept(rbf(feature_scaler(x)))
+    encoding = lambda x : add_intercept(feature_scaler(x))
     # encoding = lambda x : np.ones(shape=(x.shape[0], 1))
     # encoding = add_intercept
     n_actions = len(trial.action_space)
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     # beta_0 = np.random.normal(scale=1, size=beta_0.shape)
-    policy = Policy(beta_0, state_encoding=encoding)    
+    unif_policy = Policy(beta_0, state_encoding=encoding)    
     disc = 0.95
-
+    
+    beta_expert = np.zeros_like(beta_0)
+    beta_expert[0,1] = 2 # Make insulin more likely in general
+    beta_expert[0,[2,3]] = -2 # make encouraging messages unlikely
+    beta_expert[1,[1,3]] = 5 # as glucose goes up, increase chance of insulin
+    exp_policy = Policy(beta_expert, state_encoding=encoding) 
+    
     for t in range(t_max):
-        trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
+        trial.step_forward_in_time(policy=unif_policy, apply_dropout=dropout)
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
                 
-    value_estimator, policy_loss = get_value_estimator(trial, policy, disc, policy_penalty=0.5)
+    value_estimator, policy_loss = get_value_estimator(trial, unif_policy, disc, policy_penalty=0.01)
     theta_hat = value_estimator(beta_0)
 
-    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-5, 'disp':True})
-    
-    beta_hat = result.x.reshape(beta_0.shape)
-    est_opt_val = -result.fun # Note: doesn't account for penalty.
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     mc_value = trial.get_returns(discount=disc).mean()
     print(f"Est. value fn param: {theta_hat.round(3)}")
     print(f"{'Avg estimated value across starting states:':<50} {value_est_at_t0:8.2f}")
     print(f"{'Uniform policy in-sample MC value estimate:':<50} {mc_value:8.2f}")
     
+    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-5, 'disp':True})
+    
+    beta_hat = result.x.reshape(beta_0.shape)
+    est_opt_val = -result.fun # Note: doesn't account for penalty.
     est_policy = Policy(beta_hat, state_encoding=encoding)
     
     # Monte Carlo evaluations
     trials = {}
     policies = {
-        "Uniform" : policy,
-        "Estimated" : est_policy,
-        "Expert" : SimpleInsulinPolicy()
+        "Uniform" : unif_policy,
+        "Expert-Parametric" : exp_policy,
+        "Expert-Heuristic" : SimpleInsulinPolicy(),
+        "Estimated" : est_policy
     }
     
     for label, pol in policies.items():
@@ -247,7 +256,7 @@ if __name__ == "__main__":
         mc_value, mc_std = mc_value_est(pol, disc, new_trial=newtrial, apply_dropout=dropout)
         trials[label] = newtrial
         printstr = label + " policy out-of-sample MC value estimate:"
-        print(f"{printstr:<50} {mc_value:8.2f} ± {mc_std:2.2f}")
+        print(f"{printstr:<60} {mc_value:8.2f} ± {mc_std:2.2f}")
         
     ylim = (dt.gluc_min, dt.gluc_max)
     for label, newtrial in trials.items():
@@ -259,5 +268,5 @@ if __name__ == "__main__":
             subtitle=f"({label} policy)"
         )
 
-    print(trials["Estimated"].get_patient_table(0).round(2))
+    # print(trials["Estimated"].get_patient_table(0).round(2))
     
