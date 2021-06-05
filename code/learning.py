@@ -138,8 +138,7 @@ def get_policy_probs(policy, encoded_states, actions):
     return selected_action_probs
 
 def get_value_estimator(
-        trial, policy, discount, bootstrap_weights = None,
-        policy_penalty=0, verbose=True
+        trial, state_encoding, discount, bootstrap_weights=None
     ):
     """ 
     Precompute terms for value function estimation, then return a function
@@ -148,13 +147,13 @@ def get_value_estimator(
 
     # Precompute as much as possible.
     psi_S = [
-        policy.state_encoding(trial.S[i,:trial.last_time_index(i)+1]) 
+        state_encoding(trial.S[i,:trial.last_time_index(i)+1]) 
         for i in range(trial.n)
     ]
     bootstrap_weights = (
         np.ones(trial.n) if bootstrap_weights is None else bootstrap_weights
     )
-    p = trial.infer_encoding_size(policy.state_encoding)
+    p = trial.infer_encoding_size(state_encoding)
     n_actions = [trial.num_treatments_applied(i) for i in range(trial.n)]
     actions = [trial.A[i,:n_actions[i]].astype(int) for i in range(trial.n)]
     
@@ -173,12 +172,11 @@ def get_value_estimator(
             
             vector_summands[i][t,:] = (trial.R[i,t]/trial.A_prob[i,t]) * psi_s
         
-    def value_estimator(policy_param):
+    def value_estimator(policy):
         """ 
-        Estimate the value for the policy given by policy_param. Returns 
-        fitted scikit-learn regression object.
+        Estimate the value of the given policy. Returns a fitted scikit-learn
+        regression object.
         """
-        policy = Policy(beta_0=policy_param)
         feature_matrix = np.zeros((p, p), dtype=float)
         reward_vector = np.zeros(p, dtype=float)
         
@@ -189,18 +187,27 @@ def get_value_estimator(
         theta_hat = np.linalg.solve(feature_matrix/trial.n, reward_vector/trial.n)
         return theta_hat
     
-    psi_S_0 = policy.state_encoding(trial.S[:,0,:])
+    return value_estimator
+
+
+def get_policy_loss(
+        trial, example_policy, value_estimator, policy_penalty=0
+    ):
+    psi_S_0 = example_policy.state_encoding(trial.S[:,0,:])
+    policy_param_shape = example_policy.beta.shape
     
-    def policy_loss(policy_param):
-        theta_hat = value_estimator(policy_param.reshape(policy.beta.shape))
+    def policy_loss(flat_policy_param):
+        policy_param = flat_policy_param.reshape(policy_param_shape)
+        policy = Policy(beta_0=policy_param)
+        theta_hat = value_estimator(policy)
         mean_value = np.mean(psi_S_0 @ theta_hat)
         return -mean_value + policy_penalty * np.sum(policy_param**2)
         
-    return value_estimator, policy_loss
+    return policy_loss
 
 if __name__ == "__main__":
-    t_max = 48
-    n = 200
+    t_max = 24
+    n = 20
     dropout = False
     trial = dt.DiabetesTrial(n, t_max)
     # trial = Gridworld(n, t_max)
@@ -227,8 +234,9 @@ if __name__ == "__main__":
         trial.test_indexing()
     print(f"{trial.n - trial.engaged_inds.sum()} of {trial.n} dropped out of {trial}.")
                 
-    value_estimator, policy_loss = get_value_estimator(trial, unif_policy, disc, policy_penalty=0.01)
-    theta_hat = value_estimator(beta_0)
+    value_estimator = get_value_estimator(trial, encoding, disc)
+    policy_loss = get_policy_loss(trial, unif_policy, value_estimator, policy_penalty=0.01)
+    theta_hat = value_estimator(unif_policy)
 
     value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
     mc_value = trial.get_returns(discount=disc).mean()
@@ -252,7 +260,7 @@ if __name__ == "__main__":
     }
     
     for label, pol in policies.items():
-        newtrial = type(trial)(n=5000, t_total=500)
+        newtrial = type(trial)(n=500, t_total=50)
         mc_value, mc_std = mc_value_est(pol, disc, new_trial=newtrial, apply_dropout=dropout)
         trials[label] = newtrial
         printstr = label + " policy out-of-sample MC value estimate:"
