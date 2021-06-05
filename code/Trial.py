@@ -130,6 +130,12 @@ class Trial:
         if self.R is not None:
             self._compute_rewards()
         self.t += 1
+        
+    def step_forward_until_end(self, policy, apply_dropout, test_indexing=True):
+        while self.t < self.t_total:
+            self.step_forward_in_time(policy, apply_dropout)
+            if test_indexing:
+                self.test_indexing()
     
     def get_returns(self, discount=1, t_0=0):
         """ 
