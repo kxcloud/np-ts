@@ -113,33 +113,8 @@ class BanditTrial(trial.Trial):
             safety_per_arm = self.safety_function(contexts)
             for i in range(self.n):
                 self.safety[i, self.t] = safety_per_arm[i,int(actions[i])]
-                
-def get_easy_bandit(n, t_max, num_actions=2):
-    context_dist = DiscreteContextDistribution([[0,1],[1,0]])
-    
-    def reward_fn(contexts):
-        return contexts
-            
-    trial = BanditTrial(
-        n, 
-        t_total=t_max, 
-        num_actions=num_actions, 
-        context_distribution=context_dist,
-        reward_function=reward_fn,
-        safety_function=None
-    )
-    return trial
-    
+
 if __name__ == "__main__":
-    t_total = 10
-    trial = get_easy_bandit(n=10, t_max=t_total)
-
-    mu = None
-    for _ in range(t_total):
-        trial.step_forward_in_time(mu, apply_dropout=True)
-        trial.test_indexing()
-
-if __name__ == "__main__" and False:
     n = 5
     t_max = 10
     num_actions = 2
@@ -160,5 +135,4 @@ if __name__ == "__main__" and False:
     for t in range(t_max):
         trial.step_forward_in_time(mu, apply_dropout=True)
         trial.test_indexing()
-    # trial.plot_feature_over_time("y")
         
