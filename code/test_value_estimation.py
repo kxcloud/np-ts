@@ -3,19 +3,13 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.special import softmax
-from scipy.special import comb
+from scipy.special import expit
 from scipy.optimize import minimize
 
 import learning
 import DiabetesTrial as dt
 from Gridworld import Gridworld
 import BanditTrial as b_t
-
-project_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-tests_path = os.path.join(project_path,"tests")
-
-TEST_SETTINGS = ["test","discount", "dropout", "behavior_policy", "target_policy"]
-COL_NAMES = TEST_SETTINGS + ["estimated_value"]
 
 class HeuristicPolicy():
     
@@ -52,167 +46,121 @@ class OracleBanditPolicy():
             action_probs[i, best_a] = 1
         return action_probs
 
-
-def compare_values(results, err_tol):
-    abs_errors = np.abs(results["estimated_value"] - results["anticipated_value"])
-    return (abs_errors > err_tol).apply(lambda failed: "x" if failed else "")
-
-
-def save_test_with_anticipated_values(test_name, results, err_tol=0.05):
-    filepath = os.path.join(tests_path, f"{test_name}.csv")
+def test_value_estimation(
+    trial_class,
+    trial_constructor_args,
+    n,
+    t_total,
+    target_policy_dict,
+    monte_carlo_n=100,
+    monte_carlo_t=300,
+    error_tolerance=0.1,
+    state_encoding_value_fn_dict=None,
+    behavior_policy_dict=None,
+    discount_list=None,
+    dropout_list=None
+):
+    """ 
+    Compare estimating equation value estimates with monte carlo estimates
+    from simulation. Returns a Pandas DataFrame. 
+    """
+    if state_encoding_value_fn_dict is None:
+        state_encoding_value_fn_dict = {"identity": lambda x: x}
     
-    if os.path.exists(filepath):
-        old_results = pd.read_csv(filepath)[TEST_SETTINGS+["anticipated_value"]]
-        n_anticipated = len(old_results) - old_results["anticipated_value"].isna().sum()
-        print(
-            f"Reading {n_anticipated} of {len(old_results)} anticipated " 
-            f"values from {filepath}."
-        )
-        results = results.merge(
-            old_results,
-            on=TEST_SETTINGS, 
-            validate="one_to_one"
-        )
-        results["failed"] = compare_values(results, err_tol=err_tol)
-    else:
-        results["anticipated_value"] = None
+    if behavior_policy_dict is None:
+        behavior_policy_dict = {"uniform": None}
     
-    results.to_csv(filepath, index=False)
-    print(f"Saved {test_name} results to {filepath}.")
+    if dropout_list is None:
+        dropout_list = [False, True]
+        
+    if discount_list is None:
+        discount_list = [0, 0.5, 1]
 
-def get_two_state_bandit(n, t_max, num_actions=2):
+    # Get Monte Carlo estimates
+    monte_carlo_results = {}
+    for dropout_setting in dropout_list:
+        for target_policy_name, target_policy in target_policy_dict.items():
+            trial = trial_class(
+                n=monte_carlo_n, 
+                t_total=monte_carlo_t,
+                **trial_constructor_args
+            )
+            trial.step_forward_until_end(
+                policy=target_policy, apply_dropout=dropout_setting
+            )
+            for discount in discount_list:
+                mc_value = trial.get_returns(discount=discount).mean()
+                monte_carlo_results[(dropout_setting, target_policy, discount)] = mc_value
+                
+    records = []    
+    # Outer loop: generate data
+    for behavior_policy_name, behavior_policy in behavior_policy_dict.items():
+        for dropout_setting in dropout_list:
+            trial = trial_class(n=n, t_total=t_total, **trial_constructor_args)
+            trial.step_forward_until_end(
+                policy=behavior_policy, 
+                apply_dropout=dropout_setting
+            )
+    
+            # Middle loop: create value estimator
+            for discount in discount_list:
+                for encoding_name, encoding in state_encoding_value_fn_dict.items():
+                    value_estimator = learning.get_value_estimator(
+                        trial, 
+                        state_encoding_value_fn=encoding, 
+                        discount=discount
+                    )
+            
+                    # Inner loop: estimate values
+                    for target_policy_name, target_policy in target_policy_dict.items():
+                        theta_hat = value_estimator(target_policy)
+                        v_est = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
+                        mc_value = monte_carlo_results[(dropout_setting, target_policy, discount)]
+                        
+                        test_status = ""
+                        if discount == 1 and dropout_setting == False:
+                            test_status = "n/a"
+                        elif abs(v_est - mc_value) <= error_tolerance:
+                            test_status = "pass"
+                        else:
+                            test_status = "FAIL"
+                    
+                        record = {
+                            "trial_type" : trial_class.__name__,
+                            "discount" : discount,
+                            "dropout" : dropout_setting,
+                            "state_encoding" : encoding_name,
+                            "behavior_policy" : behavior_policy_name,
+                            "target_policy" : target_policy_name,
+                            "estimated_value" : v_est,
+                            "monte_carlo_value" : mc_value,
+                            "status" : test_status
+                        }
+                        records.append(record)
+
+    results = pd.DataFrame.from_records(records)
+    results = results.sort_values(by=["dropout","target_policy","discount"])
+    return results
+    
+if __name__ == "__main__":
+    
     context_dist = b_t.DiscreteContextDistribution([[0,1],[1,0]])
     
     def reward_fn(contexts):
         return contexts
-            
-    trial = b_t.BanditTrial(
-        n, 
-        t_total=t_max, 
-        num_actions=num_actions, 
-        context_distribution=context_dist,
-        reward_function=reward_fn,
-        safety_function=None
-    )
-    return trial
     
-
-def test_two_state_bandit():
-    test_name = "2-state bandit"
-    trial = get_two_state_bandit(n=200, t_max=1)
-    
-    encoding = lambda x: x
+    params = {
+        "num_actions": 2,
+        "context_distribution" : context_dist,
+        "reward_function" : reward_fn,
+        "safety_function": None
+    }
     
     target_policies = {
-        "worst": HeuristicPolicy(len(trial.action_space), lambda x: int(np.argmin(x))),
-        "action_0_always": HeuristicPolicy(len(trial.action_space), lambda x: 0),
-        "uniform_random": HeuristicPolicy(len(trial.action_space), lambda x: 0, epsilon=1),
-        "oracle": OracleBanditPolicy(trial.reward_function)
+        "worst": HeuristicPolicy(2, lambda x: int(np.argmin(x))),
+        "action_0_always": HeuristicPolicy(2, lambda x: 0),
+        "uniform_random": HeuristicPolicy(2, lambda x: 0, epsilon=1),
+        "oracle": OracleBanditPolicy(reward_fn)
     }
         
-    records = []
-    discounts = [0,0.5,1]
-    
-    behavior_policy = HeuristicPolicy(len(trial.action_space), lambda x: 0, epsilon=0.5)
-    behavior_policy_name = "biased"
-    
-    for dropout_setting in [True,False]:
-        trial = get_two_state_bandit(n=2000, t_max=1)
-        trial.step_forward_until_end(policy=behavior_policy, apply_dropout=dropout_setting)
-    
-        for discount in discounts:
-            value_estimator = learning.get_value_estimator(trial, state_encoding=encoding, discount=discount)
-            
-            for target_policy_name, target_policy in target_policies.items():
-                theta_hat = value_estimator(target_policy)
-                v_est = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
-                record = {
-                    "test": test_name,
-                    "discount" : discount,
-                    "dropout" : dropout_setting,
-                    "behavior_policy" : behavior_policy_name,
-                    "target_policy" : target_policy_name,
-                    "estimated_value" : v_est
-                }
-                records.append(record)
-
-    results = pd.DataFrame.from_records(records, columns=COL_NAMES)
-    results = results.sort_values(by=["dropout","target_policy","discount"])
-    return results
-
-if __name__ == "__main__":    
-    res = test_two_state_bandit()
-    save_test_with_anticipated_values("2-state bandit", res)
-    
-    # Next test: hand-coded bandit that is more complicated, but reward function is understood
-    
-    # Add Diabetes trial fixed policy value est to this test suite
-    
-
-if __name__ == "__main__" and False:
-    
-    ## TEST: contextual bandit
-    n = 5
-    t_max = 1
-    num_actions = 2
-    p = 5
-    context_dist = b_t.ContinuousContextDistribution(p, "normal")
-    # context_dist = DiscreteContextDistribution([0,1],[1,0])
-    reward_fn = b_t.get_linear_reward_function(matrix_shape=(p,num_actions))
-    trial = b_t.BanditTrial(
-        n, 
-        t_max, 
-        num_actions=num_actions, 
-        context_distribution=context_dist,
-        reward_function=reward_fn,
-    )
-    
-    dropout=False
-    encoding = lambda x : x
-    n_actions = len(trial.action_space)
-    beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
-    unif_policy = learning.Policy(beta_0, state_encoding=encoding)    
-    disc = 1
-        
-    for t in range(t_max):
-        trial.step_forward_in_time(policy=unif_policy, apply_dropout=dropout)
-        trial.test_indexing()
-                
-    value_estimator, policy_loss = learning.get_value_estimator(
-        trial, unif_policy, disc, policy_penalty=0.01
-    )
-    theta_hat = value_estimator(beta_0)
-
-    value_est_at_t0 = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
-    mc_value = trial.get_returns(discount=disc).mean()
-    print(f"Est. value fn param: {theta_hat.round(3)}")
-    print(f"{'Avg estimated value across starting states:':<50} {value_est_at_t0:8.2f}")
-    print(f"{'Uniform policy in-sample MC value estimate:':<50} {mc_value:8.2f}")
-    
-    result = minimize(policy_loss, beta_0, method="BFGS", options={'gtol':1e-5, 'disp':True})
-    
-    beta_hat = result.x.reshape(beta_0.shape)
-    est_opt_val = -result.fun # Note: doesn't account for penalty.
-    est_policy = learning.Policy(beta_hat, state_encoding=encoding)
-    
-    trials = {}
-    policies = {
-        "Uniform" : unif_policy,
-        "Estimated" : est_policy,
-        "Optimal" : OracleBanditPolicy(reward_fn)
-    }
-    
-    for label, pol in policies.items():
-        newtrial = type(trial)(
-            n=50000, 
-            t_total=t_max, 
-            num_actions=num_actions, 
-            context_distribution=context_dist,
-            reward_function=reward_fn
-        ) # will need to generalize
-        mc_value, mc_std = learning.mc_value_est(
-            pol, disc, new_trial=newtrial, apply_dropout=dropout
-        )
-        trials[label] = newtrial
-        printstr = label + " policy out-of-sample MC value estimate:"
-        print(f"{printstr:<60} {mc_value:8.2f} ± {mc_std:2.2f}")
+    a = test_value_estimation(b_t.BanditTrial, params, n=2000, t_total=1, target_policy_dict=target_policies)

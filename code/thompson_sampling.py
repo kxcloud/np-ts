@@ -8,7 +8,10 @@ import DiabetesTrial as dt
 from Gridworld import Gridworld
 import learning as l
 
-def get_ts_policy(trial, policy, discount, policy_penalty=1, mc_evaluation=False):
+def get_ts_policy(
+        trial, policy, discount, 
+        policy_penalty=1, beta_0=None, mc_evaluation=False
+    ):
     bs_weights = np.random.exponential(scale=1,size=trial.n)
     
     _ , policy_loss = l.get_value_estimator(
@@ -16,8 +19,12 @@ def get_ts_policy(trial, policy, discount, policy_penalty=1, mc_evaluation=False
         policy_penalty = policy_penalty, verbose=True
     )
     
+    if beta_0 is None:
+        beta_0 = np.zeros_like(policy.beta)
+    
     t_start = time.time()
     result = minimize(
+        # NOTE: Adam mentioned using Powell for the optimizer
         policy_loss, beta_0, method="BFGS", options={'maxiter':5, 'gtol':1e-5, 'disp':True}
     )
     duration = time.time() - t_start
@@ -27,6 +34,7 @@ def get_ts_policy(trial, policy, discount, policy_penalty=1, mc_evaluation=False
     
     policy = l.Policy(beta_hat, state_encoding=policy.state_encoding)
     info = {
+        # "bs_weights": bs_weights.round(2),
         "duration": duration,
         "value_fn_evals": result.nfev,
         "est_val": est_opt_val, 
