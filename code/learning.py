@@ -138,7 +138,11 @@ def get_policy_probs(policy, encoded_states, actions):
     return selected_action_probs
 
 def get_value_estimator(
-        trial, state_encoding, discount, bootstrap_weights=None
+        trial, 
+        discount, 
+        state_encoding_value_fn, 
+        state_encoding_policy=None,
+        bootstrap_weights=None
     ):
     """ 
     Precompute terms for value function estimation, then return a function
@@ -147,13 +151,21 @@ def get_value_estimator(
 
     # Precompute as much as possible.
     psi_S = [
-        state_encoding(trial.S[i,:trial.last_time_index(i)+1]) 
+        state_encoding_value_fn(trial.S[i,:trial.last_time_index(i)+1]) 
+        for i in range(trial.n)
+    ]
+    
+    if state_encoding_policy is None:
+        state_encoding_policy = lambda x: x
+        
+    policy_encoding_S = [
+        state_encoding_policy(trial.S[i,:trial.last_time_index(i)+1]) 
         for i in range(trial.n)
     ]
     bootstrap_weights = (
         np.ones(trial.n) if bootstrap_weights is None else bootstrap_weights
     )
-    p = trial.infer_encoding_size(state_encoding)
+    p = trial.infer_encoding_size(state_encoding_value_fn)
     n_actions = [trial.num_treatments_applied(i) for i in range(trial.n)]
     actions = [trial.A[i,:n_actions[i]].astype(int) for i in range(trial.n)]
     
@@ -181,7 +193,7 @@ def get_value_estimator(
         reward_vector = np.zeros(p, dtype=float)
         
         for i in range(trial.n):
-            policy_probs = get_policy_probs(policy, psi_S[i], actions[i]) #TODO: vectorize this across patients?
+            policy_probs = get_policy_probs(policy, policy_encoding_S[i], actions[i]) #TODO: vectorize this across patients?
             feature_matrix += np.tensordot(policy_probs, matrix_summands[i], axes=(0,0))
             reward_vector += np.tensordot(policy_probs, vector_summands[i], axes=(0,0))
         theta_hat = np.linalg.solve(feature_matrix/trial.n, reward_vector/trial.n)
