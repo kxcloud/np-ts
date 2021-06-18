@@ -114,6 +114,28 @@ class BanditTrial(trial.Trial):
             for i in range(self.n):
                 self.safety[i, self.t] = safety_per_arm[i,int(actions[i])]
 
+class BernoulliBandit(BanditTrial):
+    
+    def _compute_rewards(self):
+        # NOTE: we index directly instead of using self.get_S because
+        # we want to get include patients who disengaged.
+        contexts = self.S[:, self.t, :]
+        actions = self.A[:, self.t] 
+        
+        reward_per_arm = self.reward_function(contexts)
+        
+        random_seeds = np.random.uniform(size=len(actions))
+    
+        for i in range(self.n):
+            success = reward_per_arm[i,int(actions[i])] > random_seeds[i]
+            self.R[i, self.t] = success
+
+        if self.safety_function is not None:
+            safety_per_arm = self.safety_function(contexts)
+            for i in range(self.n):
+                self.safety[i, self.t] = safety_per_arm[i,int(actions[i])]
+
+
 if __name__ == "__main__":
     n = 5
     t_max = 10
