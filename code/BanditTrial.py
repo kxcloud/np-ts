@@ -90,7 +90,7 @@ class BanditTrial(trial.Trial):
     
     def _apply_dropout(self):
         """ In a bandit, everyone drops out after the last action. """
-        if self.t == self.t_total - 1:
+        if self.t == 0: #self.t_total - 1:
             self.engaged_inds[:] = False
             self.T_dis[:] = self.t
         
@@ -98,11 +98,16 @@ class BanditTrial(trial.Trial):
         context = self.context_distribution.sample(self.engaged_inds.sum())
         self.S[self.engaged_inds,self.t+1,:] = context
 
-    def _compute_rewards(self):
+    def _compute_rewards(self):       
+        # NOTE: this is a hack to accomodate Monte Carlo value estimation
+        # with large number of timesteps; it allows the trial to continue.
+        if self.t > 0 and not self.engaged_inds[0]:
+            return 
+            
         # NOTE: we index directly instead of using self.get_S because
-        # we want to get include patients who disengaged.
+        # we want to include patients who disengaged.
         contexts = self.S[:, self.t, :]
-        actions = self.A[:, self.t] 
+        actions = self.A[:, self.t]
         
         reward_per_arm = self.reward_function(contexts)
                 
@@ -117,6 +122,12 @@ class BanditTrial(trial.Trial):
 class BernoulliBandit(BanditTrial):
     
     def _compute_rewards(self):
+        # NOTE: this is a hack to accomodate Monte Carlo value estimation
+        # with large number of timesteps; it allows the trial to continue.
+        if self.t > 0 and not self.engaged_inds[0]:
+            return 
+            
+        
         # NOTE: we index directly instead of using self.get_S because
         # we want to get include patients who disengaged.
         contexts = self.S[:, self.t, :]

@@ -52,7 +52,7 @@ def test_value_estimation(
     n,
     t_total,
     target_policy_dict,
-    monte_carlo_n=100,
+    monte_carlo_n=200,
     monte_carlo_t=300,
     error_tolerance=0.1,
     state_encoding_value_fn_dict=None,
@@ -71,7 +71,7 @@ def test_value_estimation(
         behavior_policy_dict = {"uniform": None}
     
     if dropout_list is None:
-        dropout_list = [False, True]
+        dropout_list = [True, False]
         
     if discount_list is None:
         discount_list = [0, 0.5, 1]
@@ -111,7 +111,7 @@ def test_value_estimation(
                         discount=discount
                     )
             
-                    # Inner loop: estimate values
+                    # Inner loop: estimate values and record data
                     for target_policy_name, target_policy in target_policy_dict.items():
                         theta_hat = value_estimator(target_policy)
                         v_est = np.mean(encoding(trial.S[:,0,:]) @ theta_hat)
@@ -164,3 +164,12 @@ if __name__ == "__main__":
     }
         
     a = test_value_estimation(b_t.BanditTrial, params, n=2000, t_total=1, target_policy_dict=target_policies)
+    
+    def reward_fn(contexts):
+        return contexts * 0.8
+    
+    params["reward_function"] = reward_fn
+    
+    b = test_value_estimation(b_t.BernoulliBandit, params, n=2000, t_total=1, target_policy_dict=target_policies)
+    
+    
