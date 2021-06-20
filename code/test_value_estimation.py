@@ -172,4 +172,7 @@ if __name__ == "__main__":
     
     b = test_value_estimation(b_t.BernoulliBandit, params, n=2000, t_total=1, target_policy_dict=target_policies)
     
+    params["context_distribution"] = b_t.ContinuousContextDistribution(2, "uniform")
     
+    c = test_value_estimation(b_t.BanditTrial, params, n=2000, t_total=1, target_policy_dict=target_policies,
+                              monte_carlo_n=1000)
