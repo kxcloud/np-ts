@@ -9,18 +9,27 @@ from Gridworld import Gridworld
 import learning as l
 
 def get_ts_policy(
-        trial, policy, discount, 
-        policy_penalty=1, beta_0=None, mc_evaluation=False
-    ):
-    bs_weights = np.random.exponential(scale=1,size=trial.n)
-    
-    _ , policy_loss = l.get_value_estimator(
-        trial, policy, discount, bootstrap_weights = bs_weights, 
-        policy_penalty = policy_penalty, verbose=True
+        trial, 
+        discount,
+        state_encoding_value_fn, 
+        example_policy,
+        policy_penalty=0.01,
+        beta_0=None, 
+        mc_evaluation=False
+    ):  
+    value_estimator = l.get_value_estimator(
+        trial, 
+        discount, 
+        state_encoding_value_fn, 
+        example_policy.state_encoding,
+        bootstrap_weights = np.random.exponential(scale=1,size=trial.n)
+    )
+    policy_loss = l.get_policy_loss(
+        trial, example_policy, value_estimator, policy_penalty=policy_penalty
     )
     
     if beta_0 is None:
-        beta_0 = np.zeros_like(policy.beta)
+        beta_0 = np.zeros_like(example_policy.beta)
     
     t_start = time.time()
     result = minimize(
@@ -32,12 +41,11 @@ def get_ts_policy(
     beta_hat = result.x.reshape(beta_0.shape)
     est_opt_val = -result.fun + policy_penalty * np.sum(beta_hat**2)
     
-    policy = l.Policy(beta_hat, state_encoding=policy.state_encoding)
+    policy = l.Policy(beta_hat, state_encoding=example_policy.state_encoding)
     info = {
-        # "bs_weights": bs_weights.round(2),
         "duration": duration,
         "value_fn_evals": result.nfev,
-        "est_val": est_opt_val, 
+        "est_val": est_opt_val
     }
     if mc_evaluation:
         mean, std = l.mc_value_est(policy, discount, trial_type=type(trial))
@@ -65,7 +73,7 @@ if __name__ == "__main__":
     info_list = []
     for t in range(t_max):
         trial.step_forward_in_time(policy=policy, apply_dropout=dropout)
-        policy, info = get_ts_policy(trial, policy, discount=disc, mc_evaluation=True)
+        policy, info = get_ts_policy(trial, disc, encoding, policy, mc_evaluation=False)
         info_list.append(info)
     
     info = pd.DataFrame(info_list)

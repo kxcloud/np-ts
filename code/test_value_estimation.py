@@ -11,6 +11,9 @@ import DiabetesTrial as dt
 from Gridworld import Gridworld
 import BanditTrial as b_t
 
+project_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+tests_path = os.path.join(project_path,"tests")
+
 class HeuristicPolicy():
     
     def __init__(self, num_actions, decision_rule, epsilon=0):
@@ -52,9 +55,9 @@ def test_value_estimation(
     n,
     t_total,
     target_policy_dict,
-    monte_carlo_n=200,
+    monte_carlo_n=1000,
     monte_carlo_t=300,
-    error_tolerance=0.1,
+    error_tolerance=0.05,
     state_encoding_value_fn_dict=None,
     behavior_policy_dict=None,
     discount_list=None,
@@ -146,13 +149,10 @@ if __name__ == "__main__":
     
     context_dist = b_t.DiscreteContextDistribution([[0,1],[1,0]])
     
-    def reward_fn(contexts):
-        return contexts
-    
     params = {
         "num_actions": 2,
         "context_distribution" : context_dist,
-        "reward_function" : reward_fn,
+        "reward_function" : lambda x : x,
         "safety_function": None
     }
     
@@ -160,19 +160,15 @@ if __name__ == "__main__":
         "worst": HeuristicPolicy(2, lambda x: int(np.argmin(x))),
         "action_0_always": HeuristicPolicy(2, lambda x: 0),
         "uniform_random": HeuristicPolicy(2, lambda x: 0, epsilon=1),
-        "oracle": OracleBanditPolicy(reward_fn)
+        "oracle": OracleBanditPolicy(lambda x : x)
     }
         
     a = test_value_estimation(b_t.BanditTrial, params, n=2000, t_total=1, target_policy_dict=target_policies)
     
-    def reward_fn(contexts):
-        return contexts * 0.8
-    
-    params["reward_function"] = reward_fn
-    
+    params["reward_function"] = lambda x : 0.8 * x 
     b = test_value_estimation(b_t.BernoulliBandit, params, n=2000, t_total=1, target_policy_dict=target_policies)
     
     params["context_distribution"] = b_t.ContinuousContextDistribution(2, "uniform")
-    
+    params["reward_function"] = lambda x : x
     c = test_value_estimation(b_t.BanditTrial, params, n=2000, t_total=1, target_policy_dict=target_policies,
-                              monte_carlo_n=1000)
+                              monte_carlo_n=1000, discount_list=[0,0.25,0.5,0.75,1])
