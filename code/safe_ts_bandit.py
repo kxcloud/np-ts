@@ -72,7 +72,7 @@ if __name__ == "__main__":
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     unif_policy = learning.Policy(beta_0, state_encoding=encoding)    
         
-    num_ts_samples = 10
+    num_ts_samples = 3
     
     policies = []
     infos = []
@@ -81,9 +81,25 @@ if __name__ == "__main__":
         policies.append(policy)
         infos.append(info)
 
+    test_results = [[] for _ in policies]
+    
+    num_bs_samples = 10
+    for _ in range(num_bs_samples):
+        value_estimator = learning.get_value_estimator(
+            trial_2, 
+            1,
+            encoding, 
+            bootstrap_weights=np.random.exponential(scale=1,size=trial_2.n),
+            reward_array=trial_2.safety
+        )
+        for policy_idx, policy in enumerate(policies):
+            theta_hat_bs = value_estimator(policy)
+            safety_est_bs = (encoding(trial_2.S[:,0]) @ theta_hat_bs).mean()
+            test_results[policy_idx].append(safety_est_bs)
+
     policy.act(np.array(context_space)) # check action probs
 
-    # NEXT: hypothesis test safety of each test
+    # NEXT: hypothesis test safety of each policy
 
     # Why are tests failing?
 

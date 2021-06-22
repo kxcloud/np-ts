@@ -142,12 +142,19 @@ def get_value_estimator(
         discount, 
         state_encoding_value_fn, 
         state_encoding_policy=None,
-        bootstrap_weights=None
+        bootstrap_weights=None,
+        reward_array=None
     ):
     """ 
     Precompute terms for value function estimation, then return a function
     which takes a policy parameter and returns the estimated value.
     """
+    if reward_array is None:
+        reward_array = trial.R
+    else:
+        assert reward_array.shape[0] == trial.S.shape[0], (
+            "must have matching number of patients"    
+        )
 
     # Precompute as much as possible.
     psi_S = [
@@ -182,7 +189,7 @@ def get_value_estimator(
                 psi_s - discount * psi_s_next
             )
             
-            vector_summands[i][t,:] = (trial.R[i,t]/trial.A_prob[i,t]) * psi_s
+            vector_summands[i][t,:] = (reward_array[i,t]/trial.A_prob[i,t]) * psi_s
         
     def value_estimator(policy):
         """ 
