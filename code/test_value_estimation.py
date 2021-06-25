@@ -172,3 +172,6 @@ if __name__ == "__main__":
     params["reward_function"] = lambda x : x
     c = test_value_estimation(b_t.BanditTrial, params, n=2000, t_total=1, target_policy_dict=target_policies,
                               monte_carlo_n=1000, discount_list=[0,0.25,0.5,0.75,1])
+    
+    for df, name in zip([a,b,c],["two_state","two_state_bern","continuous"]):
+        df.to_csv(os.path.join(tests_path,f"{name}.csv"))

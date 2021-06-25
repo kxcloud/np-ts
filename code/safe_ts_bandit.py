@@ -1,6 +1,7 @@
 import copy
 
 import numpy as np
+from scipy import stats
 
 import learning
 import BanditTrial as b_t
@@ -26,6 +27,17 @@ def split_trial(trial, n_1=None):
     trial_1 = subset_trial(trial, range(n_1))
     trial_2 = subset_trial(trial, range(n_1, trial.n))
     return trial_1, trial_2
+
+def get_ipw_summands(trial, policy):
+    assert trial.t_total == 1, "Only intended for bandits."
+
+    target_probs = policy.act(trial.S[:,0])
+    actions = trial.A.astype(int)
+    
+    ipw_summands = trial.R
+    for i in range(trial.n):
+        ipw_summands[i] *= target_probs[i, actions[i]] / trial.A_prob[i]
+    return ipw_summands
 
 if __name__ == "__main__":
     # CONTEXTUAL BANDIT WITH SAFETY
@@ -68,12 +80,13 @@ if __name__ == "__main__":
     trial.step_forward_in_time(policy=None, apply_dropout=True)
     trial_1, trial_2 = split_trial(trial)
     
-    encoding = lambda x : x   
+    encoding = lambda x : learning.add_intercept(learning.add_interactions(x))
     beta_0 = np.zeros((trial.infer_encoding_size(encoding), n_actions))
     unif_policy = learning.Policy(beta_0, state_encoding=encoding)    
         
     num_ts_samples = 3
     
+    # Sample policies with Thompson Sampling
     policies = []
     infos = []
     for _ in range(num_ts_samples):
@@ -81,33 +94,27 @@ if __name__ == "__main__":
         policies.append(policy)
         infos.append(info)
 
-    test_results = [[] for _ in policies]
+    # Get marginal p-values
+    safety_threshold = 0.9
+    p_values = []
+    for policy in policies:
+        ipw_summands = get_ipw_summands(trial_2, policy)
+        mean, std = ipw_summands.mean(), ipw_summands.std()
+        t_stat = (mean - safety_threshold) / (std / np.sqrt(trial_2.n))
+        p_value = 1 - stats.norm.cdf(t_stat)
+        p_values.append(p_value)
+
+    # Apply Benjamini-Hochberg cutoff for independent data
+    nominal_level = 0.05
+    zipped_lists = zip(p_values, policies)
+    sorted_pairs = sorted(zipped_lists)
     
-    num_bs_samples = 10
-    for _ in range(num_bs_samples):
-        value_estimator = learning.get_value_estimator(
-            trial_2, 
-            1,
-            encoding, 
-            bootstrap_weights=np.random.exponential(scale=1,size=trial_2.n),
-            reward_array=trial_2.safety
-        )
-        for policy_idx, policy in enumerate(policies):
-            theta_hat_bs = value_estimator(policy)
-            safety_est_bs = (encoding(trial_2.S[:,0]) @ theta_hat_bs).mean()
-            test_results[policy_idx].append(safety_est_bs)
-
-    policy.act(np.array(context_space)) # check action probs
-
-    # NEXT: hypothesis test safety of each policy
-
-    # Why are tests failing?
-
-    # Steps:
-    # 1. Set up basic bandit problem with safety (done)
-    # 2. Split data in half (done)
-    # 3. Apply TS (on rewards) to generate policies on first half (done)
-    # 4. Apply B-H (on safety) with dependence correction on second half
-    # 5. Check actual safety of policies
-
-    # Next: non-sample split test
+    index = len(policies) - 1
+    criterion_met = False
+    while not criterion_met:
+        if p_values[index] <= index / len(policies) * nominal_level:
+            criterion_met = True
+        else:
+            index -= 1
+            
+    safe_policies = policies[:index]
